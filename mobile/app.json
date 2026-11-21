@@ -1,0 +1,25 @@
+{
+	"expo": {
+		"name": "Floorplan Walkthrough",
+		"slug": "floorplan-walkthrough",
+		"version": "0.1.0",
+		"orientation": "portrait",
+		"userInterfaceStyle": "dark",
+		"android": {
+			"package": "com.floorplan.walkthrough",
+			"permissions": ["CAMERA", "RECORD_AUDIO"]
+		},
+		"ios": {
+			"bundleIdentifier": "com.floorplan.walkthrough",
+			"infoPlist": {
+				"NSCameraUsageDescription": "Record the property walkthrough.",
+				"NSMicrophoneUsageDescription": "Talk to the live capture guide."
+			}
+		},
+		"plugins": [
+			"expo-dev-client",
+			"@livekit/react-native-expo-plugin",
+			"@config-plugins/react-native-webrtc"
+		]
+	}
+}

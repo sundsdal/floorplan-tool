@@ -5,6 +5,10 @@ import dynamic from "next/dynamic";
 import type Konva from "konva";
 import type { FloorplanState, GenerationStatus, DebugLogEntry } from "@/lib/types";
 import { exportPNG, exportSVG } from "@/lib/export";
+import type { VideoEvidence } from "@/lib/evidence";
+import type { CaptureNote } from "@/lib/gemini";
+import LiveCapture from "@/components/live-capture";
+import EvidencePanel from "@/components/evidence-panel";
 
 const FloorplanCanvas = dynamic(() => import("@/components/canvas"), { ssr: false });
 
@@ -57,7 +61,7 @@ function DebugPanel({
   };
 
   return (
-    <div className={`flex flex-col border-l border-gray-200 bg-gray-900 text-gray-100 transition-all duration-300 ${isOpen ? "w-[420px]" : "w-10"}`}>
+    <div className={`hidden md:flex flex-col border-l border-gray-200 bg-gray-900 text-gray-100 transition-all duration-300 ${isOpen ? "w-[420px]" : "w-10"}`}>
       {/* Toggle button */}
       <button
         onClick={onToggle}
@@ -147,6 +151,9 @@ function StatusBadge({ status }: { status: GenerationStatus }) {
 }
 
 export default function Home() {
+  const [captureNotes, setCaptureNotes] = useState<CaptureNote[]>([]);
+  const [evidence, setEvidence] = useState<VideoEvidence | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [floorplan, setFloorplan] = useState<FloorplanState>(EMPTY_FLOORPLAN);
   const [status, setStatus] = useState<GenerationStatus | null>(null);
@@ -177,6 +184,10 @@ export default function Home() {
       alert("Unsupported video format. Please use MP4, MOV, AVI, WebM, MPEG, WMV, or 3GPP.");
       return;
     }
+    abortRef.current?.abort();
+    setEvidence(null);
+    setWarnings([]);
+    setCaptureNotes([]);
     setVideoFile(file);
     setStatus(null);
     setFloorplan(EMPTY_FLOORPLAN);
@@ -209,6 +220,8 @@ export default function Home() {
     setStatus({ phase: "uploading", message: "Uploading video..." });
     setFloorplan(EMPTY_FLOORPLAN);
     setDebugLogs([]);
+    setEvidence(null);
+    setWarnings([]);
     logIdRef.current = 0;
 
     const addLog = (category: DebugLogEntry["category"], label: string, detail?: string, elapsed_ms?: number) => {
@@ -227,6 +240,7 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.append("video", videoFile);
+      if (captureNotes.length) formData.append("captureNotes", JSON.stringify(captureNotes));
 
       const response = await fetch("/api/floorplan", {
         method: "POST",
@@ -254,6 +268,7 @@ export default function Home() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
+          if (controller.signal.aborted) return;
           if (!line.startsWith("data: ")) continue;
           const data = line.slice(6).trim();
           if (!data || data === "[DONE]") continue;
@@ -262,7 +277,12 @@ export default function Home() {
             const event = JSON.parse(data);
             const elapsed = event.elapsed_ms ?? 0;
 
-            if (event.type === "system") {
+            if (event.type === "evidence") {
+              setEvidence(event.evidence);
+              if (Array.isArray(event.warnings)) setWarnings(event.warnings);
+            } else if (event.type === "warning") {
+              setWarnings((prev) => [...prev, event.message || "An analysis warning occurred"]);
+            } else if (event.type === "system") {
               setStatus({ phase: event.phase || "processing", message: event.message });
               addLog("system", event.message, undefined, elapsed);
             } else if (event.type === "skill") {
@@ -312,7 +332,7 @@ export default function Home() {
       setStatus({ phase: "error", message: errMsg });
       addLog("error", errMsg);
     }
-  }, [videoFile]);
+  }, [videoFile, captureNotes]);
 
   useEffect(() => {
     return () => abortRef.current?.abort();
@@ -337,6 +357,7 @@ export default function Home() {
       {/* Main content + Debug panel side by side */}
       <div className="flex flex-1 min-h-0">
       <main className="flex-1 overflow-y-auto px-6 py-8 space-y-6">
+        <LiveCapture onCapture={(file, notes) => { handleFile(file); setCaptureNotes(notes); }} disabled={isGenerating} />
         {/* Upload Zone */}
         <div
           onDrop={handleDrop}
@@ -403,6 +424,8 @@ export default function Home() {
 
           {status && <StatusBadge status={status} />}
         </div>
+
+        {videoFile && (evidence || warnings.length > 0) && <EvidencePanel file={videoFile} evidence={evidence} warnings={warnings} />}
 
         {/* Canvas Area */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden" style={{ height: "540px" }}>

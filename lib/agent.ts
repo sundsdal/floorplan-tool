@@ -1,8 +1,14 @@
-import { LlmAgent, FunctionTool, InMemoryRunner } from "@google/adk";
-import { createPartFromUri, createPartFromText, createUserContent } from "@google/genai";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { FunctionTool, InMemoryRunner, LlmAgent } from "@google/adk";
+import {
+	createPartFromText,
+	createPartFromUri,
+	createUserContent,
+} from "@google/genai";
 import { z } from "zod";
+import type { VideoEvidence } from "./evidence";
+import { getGeminiModel } from "./gemini";
 import { FloorplanCanvas } from "./server-canvas";
 import type { FloorplanState, RoomType } from "./types";
 
@@ -66,7 +72,10 @@ export function createTools(canvas: FloorplanCanvas): FunctionTool[] {
     parameters: z.object({
       start: pointSchema.describe("Start point of the wall"),
       end: pointSchema.describe("End point of the wall"),
-      thickness_m: z.number().default(0.15).describe("Wall thickness in meters"),
+			thickness_m: z
+				.number()
+				.default(0.15)
+				.describe("Wall thickness in meters"),
       height_m: z.number().default(2.7).describe("Wall height in meters"),
     }),
     execute: async ({ start, end, thickness_m, height_m }) => {
@@ -116,7 +125,7 @@ export function createTools(canvas: FloorplanCanvas): FunctionTool[] {
         wall_id,
         position_along_m,
         width_m,
-        sill_height_m
+				sill_height_m,
       );
       return { window_id: result.id };
     },
@@ -156,7 +165,9 @@ export function createTools(canvas: FloorplanCanvas): FunctionTool[] {
       wall_ids: z
         .array(z.string())
         .optional()
-        .describe("Optional wall IDs forming the room boundary in polygon order"),
+				.describe(
+					"Optional wall IDs forming the room boundary in polygon order",
+				),
     }),
     execute: async ({ point, name, type, polygon, wall_ids }) => {
       const result = canvas.labelRoom(point, name, type as RoomType, {
@@ -186,7 +197,9 @@ export function createTools(canvas: FloorplanCanvas): FunctionTool[] {
     name: "set_ceiling_height",
     description: "Set the ceiling height for a previously labeled room.",
     parameters: z.object({
-      room_label: z.string().describe("Name of the room (as used in label_room)"),
+			room_label: z
+				.string()
+				.describe("Name of the room (as used in label_room)"),
       height_m: z.number().describe("Ceiling height in meters"),
     }),
     execute: async ({ room_label, height_m }) => {
@@ -262,7 +275,8 @@ export type ProgressCallback = (event: ProgressEvent) => void;
 export async function generateFloorplan(
   videoUri: string,
   videoMimeType: string,
-  onProgress?: ProgressCallback
+	onProgress?: ProgressCallback,
+	evidence?: VideoEvidence,
 ): Promise<FloorplanState> {
   const canvas = new FloorplanCanvas();
 
@@ -277,7 +291,7 @@ export async function generateFloorplan(
 
   const agent = new LlmAgent({
     name: "floorplan_extractor",
-    model: "gemini-3.1-pro-preview",
+		model: getGeminiModel(),
     instruction: `You are a floorplan extraction agent. You analyze walkthrough videos
 of rooms/apartments and produce structured floorplan data.
 
@@ -356,7 +370,11 @@ ${skillInstructions}`,
 
 Please follow your workflow phases: first build the full structural layout (walls, doors, windows), then inspect the canvas snapshot, then reprocess/correct any issues, and finally label each room.
 
-Start with Phase 1: Spatial Mapping.`
+Use this timestamped video evidence as constraints. For each room with dimension intervals, keep its polygon extents within those intervals where possible. Treat gaps as unknowns, not observed facts. Use the exact room names from the evidence when labeling.
+
+${JSON.stringify(evidence ?? { clips: [], gaps: [], room_bounds: [] })}
+
+Start with Phase 1: Spatial Mapping.`,
     ),
   ]);
 
@@ -365,6 +383,9 @@ Start with Phase 1: Spatial Mapping.`
     sessionId: session.id,
     newMessage: userMessage,
   })) {
+    if (event.errorCode) {
+      throw new Error("Floorplan agent failed to generate a response.");
+    }
     // Track phase transitions from agent responses
     if (event.content?.parts) {
       for (const part of event.content.parts) {
@@ -372,7 +393,10 @@ Start with Phase 1: Spatial Mapping.`
           const text = part.text.toLowerCase();
           if (text.includes("phase 2") || text.includes("visual inspection")) {
             onProgress?.({ type: "skill", name: "geometry_validation" });
-          } else if (text.includes("phase 3") || text.includes("reprocessing")) {
+					} else if (
+						text.includes("phase 3") ||
+						text.includes("reprocessing")
+					) {
             onProgress?.({ type: "skill", name: "geometry_validation" });
           } else if (text.includes("phase 4") || text.includes("room naming")) {
             onProgress?.({ type: "skill", name: "room_labeling" });
