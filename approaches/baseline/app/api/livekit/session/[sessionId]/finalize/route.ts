@@ -9,6 +9,7 @@ import {
 	closeSession,
 	stopRecording,
 } from "@/lib/livekit-session";
+import { readScene, reconcileFinalScene, SceneConflict } from "@/lib/scene";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 const jobs = new Map<
@@ -29,7 +30,14 @@ export async function POST(
 		promise = (async () => {
 			await stopRecording(sessionId);
 			await waitForFinalRecording(sessionId);
-			const floorplan = await finalizeRecording(sessionId);
+			const { scene: current } = await readScene(sessionId);
+			const finalPlan = await finalizeRecording(sessionId, current.floorplan);
+			const scene = await reconcileFinalScene(
+				sessionId,
+				finalPlan,
+				current.floorplan,
+			);
+			const floorplan = scene.floorplan;
 			await closeSession(sessionId).catch(() => {});
 			return floorplan;
 		})();
@@ -47,9 +55,18 @@ export async function POST(
 				error:
 					error instanceof RecordingNotReady
 						? "Recording is still being finalized. Please retry."
-						: "Unable to finalize recording. Please retry.",
+						: error instanceof SceneConflict
+							? "The plan changed during analysis. Please retry."
+							: "Unable to finalize recording. Please retry.",
 			},
-			{ status: error instanceof RecordingNotReady ? 425 : 503 },
+			{
+				status:
+					error instanceof RecordingNotReady
+						? 425
+						: error instanceof SceneConflict
+							? 409
+							: 503,
+			},
 		);
 	}
 }

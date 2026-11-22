@@ -1,1 +1,0 @@
-"""Guided floorplan capture worker."""

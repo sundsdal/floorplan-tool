@@ -41,6 +41,12 @@ The phone publishes its camera and microphone once to a LiveKit room. A Python w
 For a local evaluation:
 
 1. Configure LiveKit with agent dispatch and Egress. Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and `LIVEKIT_AGENT_NAME=floorplan-guide` for the backend and the worker. Use a LiveKit address reachable by the phone.
-2. On the Next.js server, set `LIVEKIT_GCS_BUCKET`, `LIVEKIT_GCS_CREDENTIALS` (Egress writer service-account JSON), and `LIVEKIT_SESSION_SECRET` (a random secret of at least 32 characters). Grant server ADC read access to recording objects. Install FFmpeg with H.264 and AAC support, and complete the managed-agent configuration above. Configure a retention period on the recording bucket.
+2. On the Next.js server, set `LIVEKIT_GCS_BUCKET`, `LIVEKIT_GCS_CREDENTIALS` (Egress writer service-account JSON), and `LIVEKIT_SESSION_SECRET` (a random secret of at least 32 characters). Grant server ADC read access to recording objects and write access to Pascal draft objects. Install FFmpeg with H.264 and AAC support, and complete the managed-agent configuration above. Configure a retention period on the recording bucket.
 3. Run the backend and worker as separate processes. The worker needs ADC for a Google Cloud project with access to Gemini 3.8 Live, and `FLOORPLAN_SERVER_URL` pointing to the backend. The Expo client uses `EXPO_PUBLIC_API_URL` for session creation. Use the development build on the phone.
 4. Start a walkthrough, ask about a previously filmed detail, and finish to generate the plan. The local evaluation server assumes trusted access to the session-creation endpoint and a single backend instance for in-flight job deduplication. Network outages can leave gaps in the server recording.
+
+## Incremental Pascal capture
+
+Use the Expo client for incremental drafts. The LiveKit guide requests a draft at a room sweep or doorway transition; a recording-time fallback schedules the first check at 30 seconds. The backend inspects committed clips with Hydrogen and runs the managed geometry agent. Scene revisions are persisted alongside the recording and the phone fetches the latest drawing when the worker signals an update. Select a wall or door to revisit it. Review the proposed edit before accepting it. After Finish the phone retrieves the result over HTTP.
+
+For a reproducible two-room comparison and launch settings see the [experiment guide](../../README.md).

@@ -19,6 +19,13 @@ vi.mock("@/lib/livekit-media", () => ({
 	finalizeRecording: mocks.finalize,
 }));
 
+vi.mock("@/lib/scene", () => ({
+	readScene: async () => ({ scene: { floorplan: {} } }),
+	reconcileFinalScene: async (_id: string, floorplan: unknown) => ({
+		floorplan,
+	}),
+}));
+
 import { POST } from "@/app/api/livekit/session/[sessionId]/finalize/route";
 import { RecordingNotReady } from "@/lib/livekit-media";
 

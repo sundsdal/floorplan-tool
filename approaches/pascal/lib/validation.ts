@@ -1,1 +1,0 @@
-// Schema and geometry checks
