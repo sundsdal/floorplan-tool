@@ -263,8 +263,25 @@ export function propose(
 				added.push(wall.id);
 			}
 		}
-		// Only openings hosted by an already accepted wall are anchored.
-		const hosts = new Set(scene.floorplan.walls.map((w) => w.id));
+		// Opening positions are measured from the wall's start, so its geometry
+		// and direction must match the accepted host before applying them.
+		const hosts = new Set(
+			proposal.floorplan.walls
+				.filter((wall) => {
+					const host = scene.floorplan.walls.find((w) => w.id === wall.id);
+					return (
+						host &&
+						host.start.x === wall.start.x &&
+						host.start.y === wall.start.y &&
+						host.end.x === wall.end.x &&
+						host.end.y === wall.end.y &&
+						host.length_m === wall.length_m &&
+						host.thickness_m === wall.thickness_m &&
+						host.height_m === wall.height_m
+					);
+				})
+				.map((wall) => wall.id),
+		);
 		for (const door of proposal.floorplan.doors)
 			if (!ids.has(door.id) && hosts.has(door.wall_id)) {
 				accepted.doors.push(door);

@@ -144,6 +144,77 @@ describe("scene persistence", () => {
 		expect(scene.elementEvidence.new).toHaveLength(1);
 		expect(scene.proposals[1].status).toBe("pending");
 	});
+	it.each([
+		["reversed", { start: { x: 3, y: 0 }, end: { x: 0, y: 0 } }],
+		["extended", { end: { x: 4, y: 0 }, length_m: 4 }],
+		["thicker", { thickness_m: 0.2 }],
+		["taller", { height_m: 3 }],
+	])("keeps openings on a %s host wall pending", async (_name, changes) => {
+		await updateScene("id", 0, "first", (s) => propose(s, "first", plan, []));
+		const candidate = {
+			...plan,
+			walls: [{ ...plan.walls[0], ...changes }],
+			doors: [
+				{
+					id: "door_1",
+					wall_id: "wall_1",
+					position_along_m: 1,
+					width_m: 1,
+					type: "standard",
+				},
+			],
+			windows: [
+				{
+					id: "window_1",
+					wall_id: "wall_1",
+					position_along_m: 2,
+					width_m: 1,
+					sill_height_m: 1,
+				},
+			],
+		};
+		const scene = await updateScene("id", 1, "second", (s) =>
+			propose(s, "second", candidate, [{ startSeconds: 0, endSeconds: 1 }]),
+		);
+		expect(scene.floorplan).toEqual(plan);
+		expect(scene.proposals[1]).toMatchObject({
+			status: "pending",
+			floorplan: candidate,
+		});
+		expect(scene.elementEvidence.door_1).toBeUndefined();
+		expect(scene.elementEvidence.window_1).toBeUndefined();
+	});
+	it("automatically adds openings when the accepted host geometry is unchanged", async () => {
+		await updateScene("id", 0, "first", (s) => propose(s, "first", plan, []));
+		const candidate = {
+			...plan,
+			doors: [
+				{
+					id: "door_1",
+					wall_id: "wall_1",
+					position_along_m: 1,
+					width_m: 1,
+					type: "standard",
+				},
+			],
+			windows: [
+				{
+					id: "window_1",
+					wall_id: "wall_1",
+					position_along_m: 2,
+					width_m: 1,
+					sill_height_m: 1,
+				},
+			],
+		};
+		const scene = await updateScene("id", 1, "second", (s) =>
+			propose(s, "second", candidate, [{ startSeconds: 0, endSeconds: 1 }]),
+		);
+		expect(scene.floorplan).toEqual(candidate);
+		expect(scene.elementEvidence.door_1).toHaveLength(1);
+		expect(scene.elementEvidence.window_1).toHaveLength(1);
+		expect(scene.proposals).toHaveLength(1);
+	});
 	it("rejects final analysis based on a superseded accepted plan", async () => {
 		await updateScene("id", 0, "first", (s) => propose(s, "first", plan, []));
 		const changed = {
