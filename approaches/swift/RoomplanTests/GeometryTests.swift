@@ -20,6 +20,17 @@ final class GeometryTests: XCTestCase {
     XCTAssertTrue(svg.contains("Studio"))
     XCTAssertTrue(svg.contains("<polygon"))
   }
+  func testRotatedWallOnlyBoundaryDimensions() {
+    let c = sqrt(0.5)
+    let polygon = [[0.0, 0.0], [4 * c, 4 * c], [2 * c, 6 * c], [-2 * c, 2 * c]]
+    let wall = PlanWall(
+      id: "wall", start: .init(x: 0, y: 0), end: .init(x: 4 * c, y: 4 * c),
+      thickness_m: 0.1, height_m: 2.4, length_m: 4)
+    let (width, length) = RoomPlanConverter.dimensions(of: polygon, alignedWith: wall)
+    XCTAssertEqual(width, 4, accuracy: 0.0001)
+    XCTAssertEqual(length, 2, accuracy: 0.0001)
+    XCTAssertEqual(FloorplanDocument.area(polygon), 8, accuracy: 0.0001)
+  }
   func testReversedSharedWallPreservesOpeningPosition() {
     let wall = PlanWall(
       id: "a", start: .init(x: 0, y: 0), end: .init(x: 4, y: 0), thickness_m: 0.1, height_m: 2.4,

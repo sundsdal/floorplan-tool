@@ -3,6 +3,14 @@ import RoomPlan
 import simd
 
 enum RoomPlanConverter {
+  static func dimensions(of polygon: [[Double]], alignedWith wall: PlanWall?) -> (Double, Double) {
+    let dx = wall.map { ($0.end.x - $0.start.x) / $0.length_m } ?? 1
+    let dy = wall.map { ($0.end.y - $0.start.y) / $0.length_m } ?? 0
+    let along = polygon.map { $0[0] * dx + $0[1] * dy }
+    let across = polygon.map { -$0[0] * dy + $0[1] * dx }
+    return ((along.max() ?? 0) - (along.min() ?? 0), (across.max() ?? 0) - (across.min() ?? 0))
+  }
+
   static func convert(_ room: CapturedRoom) -> FloorplanDocument {
     var doc = FloorplanDocument()
     func point(_ surface: CapturedRoom.Surface, _ localX: Float) -> PlanPoint {
@@ -103,16 +111,12 @@ enum RoomPlanConverter {
         FloorplanDocument.area($0) < FloorplanDocument.area($1)
       })
     {
-      let firstWall = doc.floorplan.walls.first { $0.length_m > 0.001 }
-      let dx = firstWall.map { ($0.end.x - $0.start.x) / $0.length_m } ?? 1
-      let dy = firstWall.map { ($0.end.y - $0.start.y) / $0.length_m } ?? 0
-      let along = floorPolygon.map { $0[0] * dx + $0[1] * dy }
-      let across = floorPolygon.map { -$0[0] * dy + $0[1] * dx }
+      let (width, length) = dimensions(
+        of: floorPolygon, alignedWith: doc.floorplan.walls.first { $0.length_m > 0.001 })
       doc.floorplan.rooms = [
         PlanRoom(
           id: room.identifier.uuidString, name: "Room", type: "other",
-          width_m: (along.max() ?? 0) - (along.min() ?? 0),
-          length_m: (across.max() ?? 0) - (across.min() ?? 0),
+          width_m: width, length_m: length,
           height_m: doc.floorplan.walls.map(\.height_m).max() ?? 0, polygon: floorPolygon,
           walls: doc.floorplan.walls.map(\.id))
       ]
@@ -153,12 +157,11 @@ enum RoomPlanConverter {
         end = a <= b ? wall.end : wall.start
       }
       if polygon.count >= 3 && hypot(end.x - polygon[0][0], end.y - polygon[0][1]) <= 0.15 {
-        let xs = polygon.map { $0[0] }
-        let ys = polygon.map { $0[1] }
+        let (width, length) = dimensions(of: polygon, alignedWith: first)
         doc.floorplan.rooms = [
           PlanRoom(
             id: room.identifier.uuidString, name: "Room", type: "other",
-            width_m: (xs.max() ?? 0) - (xs.min() ?? 0), length_m: (ys.max() ?? 0) - (ys.min() ?? 0),
+            width_m: width, length_m: length,
             height_m: doc.floorplan.walls.map(\.height_m).max() ?? 0, polygon: polygon, walls: ids)
         ]
         doc.floorplan.total_area_m2 = FloorplanDocument.area(polygon)
