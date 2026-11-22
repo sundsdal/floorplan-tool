@@ -8,6 +8,8 @@ Open [Roomplan.xcodeproj](approaches/swift/Roomplan.xcodeproj) in Xcode, select 
 
 ## Run the baseline
 
+For the hosted AI backend, see [Deploy to kin-shared with Terraform](infra/README.md).
+
 1. Install dependencies from the repository root with `bun install`. From `approaches/baseline/`, configure the services using `config/local.env.example`, and start the API with `bun run dev` (port 3000).
 2. From the same directory, start the worker with `uv run --project worker worker dev`. Set its `FLOORPLAN_SERVER_URL` to the baseline server.
 3. From `approaches/baseline/mobile/`, run `bun run android` or `bun run ios`. Set `EXPO_PUBLIC_API_URL` to an address reachable from your phone. The Android emulator defaults to `http://10.0.2.2:3000`.
