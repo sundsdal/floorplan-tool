@@ -192,11 +192,14 @@ async function withUploads<T>(
 		);
 	}
 }
-export async function finalizeRecording(sessionId: string) {
+export async function finalizeRecording(
+	sessionId: string,
+	existing?: import("./types").FloorplanState,
+) {
 	return usingMedia(sessionId, null, (files) =>
 		withUploads(files, async ([video]) => {
 			const evidence = await dissectVideo(video);
-			const floorplan = await managedFloorplan(evidence);
+			const floorplan = await managedFloorplan(evidence, existing);
 			evidence.discrepancies = validateEvidenceGeometry(evidence, floorplan);
 			return floorplan;
 		}),
@@ -216,5 +219,99 @@ export async function reviewRecording(
 				question,
 			),
 		),
+	);
+}
+
+export async function draftRecording(
+	sessionId: string,
+	ranges: Range[],
+	existing?: import("./types").FloorplanState,
+	targetId?: string,
+) {
+	return usingMedia(sessionId, ranges, (files) =>
+		withUploads(files, async (videos) => {
+			const parts = await Promise.all(
+				videos.map((video) => dissectVideo(video)),
+			);
+			if (targetId && existing) {
+				const target = [
+					...existing.walls,
+					...existing.doors,
+					...existing.windows,
+					...existing.rooms,
+					...existing.dimensions,
+				].find((x) => x.id === targetId);
+				if (!target) throw new Error("Invalid target");
+				const latestIndex = videos.length - 1;
+				const observation = await reviewGeometry(
+					[videos[latestIndex]],
+					[ranges[latestIndex]],
+					"target geometry",
+					`Is this exact existing target visibly identifiable in the new take, with enough evidence to assess its geometry or wall association? Target: ${JSON.stringify(target)}. Return unresolved if the target or its association is not visible.`,
+				);
+				if (
+					!observation.resolved ||
+					observation.supportingTimestamps.length === 0
+				)
+					return {
+						floorplan: existing,
+						unresolved: true,
+						finding:
+							observation.finding ||
+							observation.unresolvedQuestion ||
+							"The target is not visible in this take.",
+						nextView:
+							observation.nextView ||
+							parts.at(-1)?.gaps[0] ||
+							"Film the target and its surroundings clearly.",
+					};
+			}
+			const evidence = {
+				clips: parts.flatMap((x, i) =>
+					x.clips
+						.filter(
+							(c) =>
+								c.start_s <= ranges[i].endSeconds - ranges[i].startSeconds &&
+								c.end_s <= ranges[i].endSeconds - ranges[i].startSeconds,
+						)
+						.map((c) => ({
+							...c,
+							start_s: c.start_s + ranges[i].startSeconds,
+							end_s: c.end_s + ranges[i].startSeconds,
+						})),
+				),
+				gaps: parts.flatMap((x) => x.gaps),
+				room_bounds: parts.flatMap((x) => x.room_bounds),
+				discrepancies: parts.flatMap((x) => x.discrepancies),
+			};
+			const latest = parts.at(-1);
+			if (
+				existing &&
+				latest &&
+				latest.clips.length === 0 &&
+				latest.room_bounds.length === 0
+			)
+				return {
+					floorplan: existing,
+					unresolved: true,
+					finding:
+						latest.gaps[0] || "No usable geometry was visible in this take.",
+					nextView: latest.gaps[0] || "Film the room and its walls clearly.",
+				};
+			const floorplan = await managedFloorplan(evidence, existing);
+			if (
+				!floorplan.walls.length &&
+				!floorplan.doors.length &&
+				!floorplan.windows.length &&
+				!floorplan.rooms.length
+			)
+				return {
+					floorplan,
+					unresolved: true,
+					finding: evidence.gaps[0] || "No floorplan geometry was identified.",
+					nextView: evidence.gaps[0] || "Film the room and its walls clearly.",
+				};
+			return { floorplan, unresolved: false };
+		}),
 	);
 }

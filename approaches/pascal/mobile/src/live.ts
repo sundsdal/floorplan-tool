@@ -12,11 +12,33 @@ type Session = {
 	token: string;
 	sessionToken: string;
 };
+export type Scene = {
+	revision: number;
+	floorplan: {
+		walls: {
+			id: string;
+			start: { x: number; y: number };
+			end: { x: number; y: number };
+		}[];
+		doors: {
+			id: string;
+			wall_id: string;
+			position_along_m: number;
+			width_m: number;
+		}[];
+		rooms: { id: string; name: string; polygon: [number, number][] }[];
+	};
+	nodes: Record<string, unknown>;
+	proposals: { id: string; [key: string]: unknown }[];
+	evidence: unknown[];
+};
 type Handlers = {
 	status: (connected: boolean, error?: string) => void;
 	preview: (track: LocalVideoTrack | undefined) => void;
 	transcript: (text: string) => void;
 	finding: (text: string) => void;
+	scene?: (scene: Scene) => void;
+	reshootFailed?: (targetId: string) => void;
 };
 
 export class LiveGuide {
@@ -72,11 +94,34 @@ export class LiveGuide {
 			});
 			this.room.on(RoomEvent.Reconnected, () => {
 				void this.sendRecordingStart();
+				void this.refreshScene().catch(() => {});
 			});
 			this.room.on(
 				RoomEvent.DataReceived,
 				(payload, _participant, _kind, topic) => {
-					if (this.closed || topic !== "floorplan.finding") return;
+					if (this.closed) return;
+					if (topic === "floorplan.scene" || topic === "floorplan.reshoot") {
+						try {
+							const value = JSON.parse(new TextDecoder().decode(payload));
+							if (topic === "floorplan.scene" && value.type === "scene")
+								void this.refreshScene().catch(() =>
+									this.handlers.status(
+										false,
+										"Could not refresh the plan. It will retry on reconnect.",
+									),
+								);
+							if (
+								topic === "floorplan.reshoot" &&
+								value.action === "failed" &&
+								typeof value.targetId === "string"
+							)
+								this.handlers.reshootFailed?.(value.targetId);
+						} catch {
+							/* Ignore malformed messages. */
+						}
+						return;
+					}
+					if (topic !== "floorplan.finding") return;
 					try {
 						const value = JSON.parse(new TextDecoder().decode(payload));
 						this.handlers.finding(
@@ -123,6 +168,7 @@ export class LiveGuide {
 				return;
 			}
 			this.handlers.preview(camera?.track as LocalVideoTrack | undefined);
+			void this.refreshScene().catch(() => {});
 			await this.startRecording();
 			void this.publishRecordingStart();
 			if (!this.closed)
@@ -200,6 +246,74 @@ export class LiveGuide {
 		} catch {
 			/* Reconnection will retry. */
 		}
+	}
+
+	private scenePath() {
+		if (!this.session) throw new Error("Session has not started.");
+		return `/api/livekit/session/${encodeURIComponent(this.session.sessionId)}/scene`;
+	}
+	async refreshScene() {
+		if (!this.session) return;
+		const response = await fetch(`${this.base}${this.scenePath()}`, {
+			headers: { Authorization: `Bearer ${this.session.sessionToken}` },
+		});
+		if (!response.ok) throw new Error("Could not load the plan.");
+		const { scene } = (await response.json()) as { scene: Scene };
+		this.handlers.scene?.(scene);
+		return scene;
+	}
+	async decide(
+		proposalId: string,
+		revision: number,
+		decision: "accept" | "reject",
+	) {
+		if (!this.session) return;
+		const response = await fetch(
+			`${this.base}${this.scenePath()}/proposals/${encodeURIComponent(proposalId)}`,
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${this.session.sessionToken}`,
+				},
+				body: JSON.stringify({
+					baseRevision: revision,
+					requestId: `${Date.now()}-${Math.random()}`,
+					decision,
+				}),
+			},
+		);
+		if (response.status === 409) {
+			await this.refreshScene();
+			throw new Error("The plan changed. Review the latest version.");
+		}
+		if (!response.ok) throw new Error("Could not save your decision.");
+		const { scene } = (await response.json()) as { scene: Scene };
+		this.handlers.scene?.(scene);
+	}
+	async reshoot(
+		targetId: string,
+		action: "start" | "done" | "skip" | "inaccessible",
+		startSeconds?: number,
+	) {
+		if (!this.recordingStartedAt)
+			throw new Error("Recording is still starting. Try again shortly.");
+		const endSeconds = this.recordingStartedAt
+			? Math.max(0, (Date.now() - this.recordingStartedAt) / 1000)
+			: undefined;
+		await this.room.localParticipant.publishData(
+			new TextEncoder().encode(
+				JSON.stringify({
+					targetId,
+					questionId: targetId,
+					action,
+					startSeconds,
+					endSeconds,
+				}),
+			),
+			{ reliable: true, topic: "floorplan.reshoot" },
+		);
+		return endSeconds;
 	}
 
 	async sendText(text: string) {

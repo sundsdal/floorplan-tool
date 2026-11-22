@@ -1,12 +1,12 @@
 {
-	"name": "floorplan-mobile",
+	"name": "pascal-floorplan-mobile",
 	"version": "0.1.0",
 	"private": true,
 	"main": "index.js",
 	"scripts": {
-		"start": "expo start --dev-client",
-		"android": "expo run:android",
-		"ios": "expo run:ios",
+		"start": "expo start --dev-client --port 8082",
+		"android": "expo run:android --port 8082",
+		"ios": "expo run:ios --port 8082",
 		"typecheck": "tsgo --noEmit",
 		"lint": "biome check ."
 	},

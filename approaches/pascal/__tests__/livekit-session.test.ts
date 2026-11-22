@@ -73,7 +73,7 @@ describe("LiveKit session lifecycle", () => {
 		);
 		expect(recordingPlaylist(session.sessionId)).toEqual({
 			bucket: "private-bucket",
-			object: `captures/${session.sessionId}/recording.m3u8`,
+			object: `approaches/pascal/captures/${session.sessionId}/recording.m3u8`,
 		});
 	});
 	it("starts participant HLS and stops active recording only once", async () => {
@@ -90,7 +90,7 @@ describe("LiveKit session lifecycle", () => {
 		expect(room).toBe(session.roomName);
 		expect(identity).toBe(session.participantIdentity);
 		expect(output.segments.playlistName).toBe(
-			`captures/${session.sessionId}/recording.m3u8`,
+			`approaches/pascal/captures/${session.sessionId}/recording.m3u8`,
 		);
 		expect(output.segments.output.value.bucket).toBe("private-bucket");
 		mocks.listEgress.mockResolvedValue([{ egressId: "EG_1", status: 1 }]);

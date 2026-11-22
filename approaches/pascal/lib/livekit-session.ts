@@ -55,7 +55,7 @@ export function recordingPlaylist(sessionId: string) {
 	if (!SESSION_ID.test(sessionId)) throw new Error("Invalid session");
 	return {
 		bucket: config().bucket,
-		object: `captures/${sessionId}/recording.m3u8`,
+		object: `approaches/pascal/captures/${sessionId}/recording.m3u8`,
 	};
 }
 function capability(sessionId: string, scope: "session" | "review") {
@@ -197,7 +197,7 @@ async function startRecordingOnce(sessionId: string) {
 			startedAt: mediaStart(active),
 		};
 	if (existing.length) throw new Error("Recording already ended");
-	const prefix = `captures/${sessionId}`;
+	const prefix = `approaches/pascal/captures/${sessionId}`;
 	const segments = new SegmentedFileOutput({
 		protocol: SegmentedFileProtocol.HLS_PROTOCOL,
 		filenamePrefix: `${prefix}/segment`,

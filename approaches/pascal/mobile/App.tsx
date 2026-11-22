@@ -13,11 +13,12 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
-import { LiveGuide } from "./src/live";
+import { LiveGuide, type Scene } from "./src/live";
+import { Plan } from "./src/Plan";
 
 export default function App() {
 	const [server, setServer] = useState(
-		process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:3000",
+		process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:3001",
 	);
 	const [recording, setRecording] = useState(false);
 	const [analysisPending, setAnalysisPending] = useState(false);
@@ -29,7 +30,12 @@ export default function App() {
 	const [finding, setFinding] = useState("");
 	const [error, setError] = useState("");
 	const [result, setResult] = useState("");
+	const [scene, setScene] = useState<Scene>();
+	const [selected, setSelected] = useState<string>();
+	const [shotStart, setShotStart] = useState<number>();
 	const guide = useRef<LiveGuide | null>(null);
+	const reviewRevision = useRef<number | null>(null);
+	const [reviewing, setReviewing] = useState(false);
 	useEffect(
 		() => () => {
 			void guide.current?.close();
@@ -42,17 +48,45 @@ export default function App() {
 		setResult("");
 		setFinding("");
 		setTranscript("");
+		setScene(undefined);
+		setSelected(undefined);
+		setShotStart(undefined);
+		setReviewing(false);
+		reviewRevision.current = null;
 		const client = new LiveGuide(server.replace(/\/$/, ""), {
 			status: (online, message) => {
+				if (guide.current !== client) return;
 				setConnected(online);
 				if (message) setError(message);
 			},
-			preview: setPreview,
+			preview: (track) => {
+				if (guide.current === client) setPreview(track);
+			},
 			transcript: (text) =>
+				guide.current === client &&
 				setTranscript((old) =>
 					`${old}${old ? "\n\n" : ""}${text}`.slice(-3000),
 				),
-			finding: setFinding,
+			finding: (text) => {
+				if (guide.current === client) setFinding(text);
+			},
+			reshootFailed: () => {
+				if (guide.current !== client) return;
+				reviewRevision.current = null;
+				setReviewing(false);
+				setError("Could not review that shot. Film it again and retry.");
+			},
+			scene: (next) => {
+				if (guide.current !== client) return;
+				if (
+					reviewRevision.current !== null &&
+					next.revision > reviewRevision.current
+				) {
+					reviewRevision.current = null;
+					setReviewing(false);
+				}
+				setScene((old) => (!old || next.revision >= old.revision ? next : old));
+			},
 		});
 		guide.current = client;
 		try {
@@ -77,10 +111,15 @@ export default function App() {
 			const data = JSON.parse(await client.finalize()) as {
 				floorplan: unknown;
 			};
-			setResult(
-				`Floor plan ready.\n${JSON.stringify(data.floorplan, null, 2)}`,
-			);
-			guide.current = null;
+			setScene((old) => ({
+				revision: old?.revision ?? 0,
+				floorplan: data.floorplan as Scene["floorplan"],
+				nodes: old?.nodes ?? {},
+				proposals: old?.proposals ?? [],
+				evidence: old?.evidence ?? [],
+			}));
+			setResult("Floor plan ready.");
+			await client.refreshScene();
 			setAnalysisPending(false);
 		} catch {
 			setError("Recording stopped. Analysis is not ready; please retry.");
@@ -194,6 +233,96 @@ export default function App() {
 						</View>
 					</>
 				)}
+				<View style={styles.guide}>
+					<Text style={styles.small}>
+						FLOOR PLAN {scene ? `· REVISION ${scene.revision}` : ""}
+					</Text>
+					<Text style={styles.finding}>
+						Approximate geometry inferred from video; verify measurements on
+						site.
+					</Text>
+					{reviewing && (
+						<Text style={styles.finding}>
+							Reviewing the shot… You can keep filming.
+						</Text>
+					)}
+					<Plan
+						floorplan={scene?.floorplan as Scene["floorplan"]}
+						selected={selected}
+						onSelect={(id) => {
+							setSelected(id);
+							setShotStart(undefined);
+						}}
+					/>
+					{selected && (
+						<Text style={styles.guideText}>Selected: {selected}</Text>
+					)}
+					{recording && selected && (
+						<TouchableOpacity
+							accessibilityRole="button"
+							style={styles.primary}
+							onPress={() => {
+								void (async () => {
+									try {
+										if (shotStart === undefined) {
+											const start = await guide.current?.reshoot(
+												selected,
+												"start",
+											);
+											setShotStart(start ?? 0);
+										} else {
+											reviewRevision.current = scene?.revision ?? 0;
+											setReviewing(true);
+											await guide.current?.reshoot(selected, "done", shotStart);
+											setShotStart(undefined);
+										}
+									} catch {
+										reviewRevision.current = null;
+										setReviewing(false);
+										setError("Could not send the shot request.");
+									}
+								})();
+							}}
+						>
+							<Text style={styles.primaryText}>
+								{shotStart === undefined
+									? "Film this again"
+									: "Check this shot"}
+							</Text>
+						</TouchableOpacity>
+					)}
+					{scene?.proposals
+						.filter((proposal) => proposal.status === "pending")
+						.map((proposal) => (
+							<View key={proposal.id} style={styles.guide}>
+								<Text style={styles.guideText}>
+									Proposed change · orange shows changed or added elements
+								</Text>
+								<Plan
+									floorplan={proposal.floorplan as Scene["floorplan"]}
+									compareTo={scene.floorplan}
+								/>
+								<View style={styles.row}>
+									{(["accept", "reject"] as const).map((decision) => (
+										<TouchableOpacity
+											key={decision}
+											accessibilityRole="button"
+											style={[styles.primary, styles.flex]}
+											onPress={() => {
+												void guide.current
+													?.decide(proposal.id, scene.revision, decision)
+													.catch((e: Error) => setError(e.message));
+											}}
+										>
+											<Text style={styles.primaryText}>
+												{decision === "accept" ? "Accept" : "Dismiss"}
+											</Text>
+										</TouchableOpacity>
+									))}
+								</View>
+							</View>
+						))}
+				</View>
 				{!!error && <Text style={styles.error}>{error}</Text>}
 				{!!result && (
 					<Text selectable style={styles.result}>

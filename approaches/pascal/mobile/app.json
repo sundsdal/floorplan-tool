@@ -1,16 +1,16 @@
 {
 	"expo": {
-		"name": "Floorplan Walkthrough",
-		"slug": "floorplan-walkthrough",
+		"name": "Floorplan Pascal",
+		"slug": "pascal-floorplan",
 		"version": "0.1.0",
 		"orientation": "portrait",
 		"userInterfaceStyle": "dark",
 		"android": {
-			"package": "com.floorplan.walkthrough",
+			"package": "com.floorplan.walkthrough.pascal",
 			"permissions": ["CAMERA", "RECORD_AUDIO"]
 		},
 		"ios": {
-			"bundleIdentifier": "com.floorplan.walkthrough",
+			"bundleIdentifier": "com.floorplan.walkthrough.pascal",
 			"infoPlist": {
 				"NSCameraUsageDescription": "Record the property walkthrough.",
 				"NSMicrophoneUsageDescription": "Talk to the live capture guide."
