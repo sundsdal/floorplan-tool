@@ -1,6 +1,13 @@
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 
+import {
+	createDocument,
+	type FloorplanDocument,
+	renderSVG,
+} from "@floorplan/core";
 import { VideoView } from "@livekit/react-native";
+import { File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import type { LocalVideoTrack } from "livekit-client";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,6 +20,7 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { SvgXml } from "react-native-svg";
 import { LiveGuide, type Scene } from "./src/live";
 import { Plan, PlanDetails } from "./src/Plan";
 
@@ -29,12 +37,14 @@ export default function App() {
 	const [question, setQuestion] = useState("");
 	const [finding, setFinding] = useState("");
 	const [error, setError] = useState("");
-	const [result, setResult] = useState("");
+	const [result, setResult] = useState<FloorplanDocument | null>(null);
+	const [zoom, setZoom] = useState(1);
 	const [scene, setScene] = useState<Scene>();
 	const [selected, setSelected] = useState<string>();
 	const [shotStart, setShotStart] = useState<number>();
 	const guide = useRef<LiveGuide | null>(null);
 	const reviewRevision = useRef<number | null>(null);
+	const sceneRevision = useRef(-1);
 	const [reviewing, setReviewing] = useState(false);
 	useEffect(
 		() => () => {
@@ -45,7 +55,7 @@ export default function App() {
 	const start = async () => {
 		setBusy(true);
 		setError("");
-		setResult("");
+		setResult(null);
 		setFinding("");
 		setTranscript("");
 		setScene(undefined);
@@ -53,6 +63,7 @@ export default function App() {
 		setShotStart(undefined);
 		setReviewing(false);
 		reviewRevision.current = null;
+		sceneRevision.current = -1;
 		const client = new LiveGuide(server.replace(/\/$/, ""), {
 			status: (online, message) => {
 				if (guide.current !== client) return;
@@ -106,10 +117,11 @@ export default function App() {
 		setRecording(false);
 		setAnalysisPending(true);
 		setError("");
-		setResult("Preparing your floor plan…");
+		setResult(null);
 		try {
 			const data = JSON.parse(await client.finalize()) as {
-				floorplan: unknown;
+				floorplan: Parameters<typeof createDocument>[0];
+				warnings?: string[];
 			};
 			setScene((old) => ({
 				revision: old?.revision ?? 0,
@@ -118,14 +130,33 @@ export default function App() {
 				proposals: old?.proposals ?? [],
 				evidence: old?.evidence ?? [],
 			}));
-			setResult("Floor plan ready.");
-			await client.refreshScene();
+			const document = createDocument(data.floorplan, "video");
+			setResult({ ...document, warnings: data.warnings ?? document.warnings });
+			setZoom(1);
+			await client.refreshScene().catch(() => {});
 			setAnalysisPending(false);
 		} catch {
 			setError("Recording stopped. Analysis is not ready; please retry.");
-			setResult("");
+			setResult(null);
 		} finally {
 			setBusy(false);
+		}
+	};
+	const share = async (format: "svg" | "json") => {
+		if (!result) return;
+		try {
+			if (!(await Sharing.isAvailableAsync()))
+				throw new Error("Sharing is unavailable on this device.");
+			const file = new File(Paths.cache, `floorplan.${format}`);
+			file.create({ overwrite: true });
+			file.write(
+				format === "svg" ? renderSVG(result) : JSON.stringify(result, null, 2),
+			);
+			await Sharing.shareAsync(file.uri, {
+				mimeType: format === "svg" ? "image/svg+xml" : "application/json",
+			});
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Could not share floor plan.");
 		}
 	};
 	const send = async () => {
@@ -233,106 +264,170 @@ export default function App() {
 						</View>
 					</>
 				)}
-				<View style={styles.guide}>
-					<Text style={styles.small}>
-						FLOOR PLAN {scene ? `· REVISION ${scene.revision}` : ""}
-					</Text>
-					<Text style={styles.finding}>
-						Approximate geometry inferred from video; verify measurements on
-						site.
-					</Text>
-					{reviewing && (
-						<Text style={styles.finding}>
-							Reviewing the shot… You can keep filming.
+				{(!result ||
+					scene?.proposals.some(
+						(proposal) => proposal.status === "pending",
+					)) && (
+					<View style={styles.guide}>
+						<Text style={styles.small}>
+							FLOOR PLAN {scene ? `· REVISION ${scene.revision}` : ""}
 						</Text>
-					)}
-					<Plan
-						floorplan={scene?.floorplan as Scene["floorplan"]}
-						selected={selected}
-						onSelect={(id) => {
-							setSelected(id);
-							setShotStart(undefined);
-						}}
-					/>
-					<PlanDetails floorplan={scene?.floorplan} />
-					{selected && (
-						<Text style={styles.guideText}>Selected: {selected}</Text>
-					)}
-					{recording && selected && (
-						<TouchableOpacity
-							accessibilityRole="button"
-							style={styles.primary}
-							onPress={() => {
-								void (async () => {
-									try {
-										if (shotStart === undefined) {
-											const start = await guide.current?.reshoot(
-												selected,
-												"start",
-											);
-											setShotStart(start ?? 0);
-										} else {
-											reviewRevision.current = scene?.revision ?? 0;
-											setReviewing(true);
-											await guide.current?.reshoot(selected, "done", shotStart);
-											setShotStart(undefined);
-										}
-									} catch {
-										reviewRevision.current = null;
-										setReviewing(false);
-										setError("Could not send the shot request.");
-									}
-								})();
-							}}
-						>
-							<Text style={styles.primaryText}>
-								{shotStart === undefined
-									? "Film this again"
-									: "Check this shot"}
+						<Text style={styles.finding}>
+							Approximate geometry inferred from video; verify measurements on
+							site.
+						</Text>
+						{reviewing && (
+							<Text style={styles.finding}>
+								Reviewing the shot… You can keep filming.
 							</Text>
-						</TouchableOpacity>
-					)}
-					{scene?.proposals
-						.filter((proposal) => proposal.status === "pending")
-						.map((proposal) => (
-							<View key={proposal.id} style={styles.guide}>
-								<Text style={styles.guideText}>
-									Proposed change · orange shows changed or added elements
+						)}
+						<Plan
+							floorplan={scene?.floorplan as Scene["floorplan"]}
+							selected={selected}
+							onSelect={(id) => {
+								setSelected(id);
+								setShotStart(undefined);
+							}}
+						/>
+						<PlanDetails floorplan={scene?.floorplan} />
+						{selected && (
+							<Text style={styles.guideText}>Selected: {selected}</Text>
+						)}
+						{recording && selected && (
+							<TouchableOpacity
+								accessibilityRole="button"
+								style={styles.primary}
+								onPress={() => {
+									void (async () => {
+										try {
+											if (shotStart === undefined) {
+												const start = await guide.current?.reshoot(
+													selected,
+													"start",
+												);
+												setShotStart(start ?? 0);
+											} else {
+												reviewRevision.current = scene?.revision ?? 0;
+												setReviewing(true);
+												await guide.current?.reshoot(
+													selected,
+													"done",
+													shotStart,
+												);
+												setShotStart(undefined);
+											}
+										} catch {
+											reviewRevision.current = null;
+											setReviewing(false);
+											setError("Could not send the shot request.");
+										}
+									})();
+								}}
+							>
+								<Text style={styles.primaryText}>
+									{shotStart === undefined
+										? "Film this again"
+										: "Check this shot"}
 								</Text>
-								<Plan
-									floorplan={proposal.floorplan as Scene["floorplan"]}
-									compareTo={scene.floorplan}
-								/>
-								<PlanDetails
-									floorplan={proposal.floorplan as Scene["floorplan"]}
-									compareTo={scene.floorplan}
-								/>
-								<View style={styles.row}>
-									{(["accept", "reject"] as const).map((decision) => (
-										<TouchableOpacity
-											key={decision}
-											accessibilityRole="button"
-											style={[styles.primary, styles.flex]}
-											onPress={() => {
-												void guide.current
-													?.decide(proposal.id, scene.revision, decision)
-													.catch((e: Error) => setError(e.message));
-											}}
-										>
-											<Text style={styles.primaryText}>
-												{decision === "accept" ? "Accept" : "Dismiss"}
-											</Text>
-										</TouchableOpacity>
-									))}
+							</TouchableOpacity>
+						)}
+						{scene?.proposals
+							.filter((proposal) => proposal.status === "pending")
+							.map((proposal) => (
+								<View key={proposal.id} style={styles.guide}>
+									<Text style={styles.guideText}>
+										Proposed change · orange shows changed or added elements
+									</Text>
+									<Plan
+										floorplan={proposal.floorplan as Scene["floorplan"]}
+										compareTo={scene.floorplan}
+									/>
+									<PlanDetails
+										floorplan={proposal.floorplan as Scene["floorplan"]}
+										compareTo={scene.floorplan}
+									/>
+									<View style={styles.row}>
+										{(["accept", "reject"] as const).map((decision) => (
+											<TouchableOpacity
+												key={decision}
+												accessibilityRole="button"
+												style={[styles.primary, styles.flex]}
+												onPress={() => {
+													void guide.current
+														?.decide(proposal.id, scene.revision, decision)
+														.catch((e: Error) => setError(e.message));
+												}}
+											>
+												<Text style={styles.primaryText}>
+													{decision === "accept" ? "Accept" : "Dismiss"}
+												</Text>
+											</TouchableOpacity>
+										))}
+									</View>
 								</View>
-							</View>
-						))}
-				</View>
+							))}
+					</View>
+				)}
 				{!!error && <Text style={styles.error}>{error}</Text>}
-				{!!result && (
-					<Text selectable style={styles.result}>
-						{result}
-					</Text>
+				{result && (
+					<View style={styles.review}>
+						<Text style={styles.guideText}>
+							Floor plan review · Video walkthrough
+						</Text>
+						<Text style={styles.statusText}>
+							{result.floorplan.rooms.length} rooms ·{" "}
+							{result.floorplan.total_area_m2.toFixed(1)} m²
+						</Text>
+						{[...new Set(result.warnings)].map((warning) => (
+							<Text key={warning} style={styles.finding}>
+								{warning}
+							</Text>
+						))}
+						<ScrollView horizontal style={styles.plan} nestedScrollEnabled>
+							<ScrollView nestedScrollEnabled>
+								<SvgXml
+									xml={renderSVG(result)}
+									width={320 * zoom}
+									height={320 * zoom}
+								/>
+							</ScrollView>
+						</ScrollView>
+						<View style={styles.row}>
+							<TouchableOpacity
+								accessibilityRole="button"
+								accessibilityLabel="Zoom out"
+								style={styles.send}
+								onPress={() => setZoom((value) => Math.max(1, value - 0.5))}
+							>
+								<Text style={styles.primaryText}>−</Text>
+							</TouchableOpacity>
+							<Text style={styles.statusText}>{Math.round(zoom * 100)}%</Text>
+							<TouchableOpacity
+								accessibilityRole="button"
+								accessibilityLabel="Zoom in"
+								style={styles.send}
+								onPress={() => setZoom((value) => Math.min(4, value + 0.5))}
+							>
+								<Text style={styles.primaryText}>+</Text>
+							</TouchableOpacity>
+						</View>
+						<View style={styles.row}>
+							<TouchableOpacity
+								accessibilityRole="button"
+								style={styles.send}
+								onPress={() => void share("svg")}
+							>
+								<Text style={styles.primaryText}>Share SVG</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								accessibilityRole="button"
+								style={styles.send}
+								onPress={() => void share("json")}
+							>
+								<Text style={styles.primaryText}>Share JSON</Text>
+							</TouchableOpacity>
+						</View>
+					</View>
 				)}
 			</ScrollView>
 		</SafeAreaView>
@@ -398,5 +493,6 @@ const styles = StyleSheet.create({
 		borderRadius: 12,
 	},
 	error: { color: "#ffa99d", lineHeight: 20 },
-	result: { color: "#e0eee4", fontSize: 12 },
+	review: { gap: 12 },
+	plan: { height: 320, backgroundColor: "white", borderRadius: 12 },
 });

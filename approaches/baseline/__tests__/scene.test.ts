@@ -115,7 +115,7 @@ describe("scene persistence", () => {
 						wall_id: "wall_1",
 						position_along_m: 2.9,
 						width_m: 1,
-						type: "standard",
+						type: "standard" as const,
 					},
 				],
 			}),
@@ -160,7 +160,7 @@ describe("scene persistence", () => {
 					wall_id: "wall_1",
 					position_along_m: 1,
 					width_m: 1,
-					type: "standard",
+					type: "standard" as const,
 				},
 			],
 			windows: [
@@ -194,7 +194,7 @@ describe("scene persistence", () => {
 					wall_id: "wall_1",
 					position_along_m: 1,
 					width_m: 1,
-					type: "standard",
+					type: "standard" as const,
 				},
 			],
 			windows: [

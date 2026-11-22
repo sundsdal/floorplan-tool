@@ -1,0 +1,17 @@
+{
+  "name": "floorplan-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "approaches/baseline",
+    "approaches/baseline/mobile"
+  ],
+  "scripts": {
+    "test": "bun run --cwd=approaches/baseline test",
+    "typecheck": "bun run --cwd=approaches/baseline typecheck && bun run --cwd=approaches/baseline/mobile typecheck"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  }
+}
