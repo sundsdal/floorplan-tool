@@ -94,6 +94,20 @@ describe("FloorplanCanvas", () => {
     expect(arcs[0].getAttribute("data-stroke")).toBe("#3B82F6");
   });
 
+  it("centers a door opening on its position along a rotated wall", () => {
+    const floorplan: FloorplanState = {
+      ...emptyFloorplan,
+      walls: [{ id: "w1", start: { x: 1, y: 1 }, end: { x: 1, y: 5 }, thickness_m: 0.15, height_m: 2.7, length_m: 4 }],
+      doors: [{ id: "d1", wall_id: "w1", position_along_m: 3.5, width_m: 1, type: "standard" }],
+    };
+    const { getByTestId } = render(<FloorplanCanvas floorplan={floorplan} />);
+    const arc = getByTestId("konva-arc");
+    const group = arc.parentElement!;
+    expect(JSON.parse(group.getAttribute("data-props")!)).toMatchObject({ x: 50, y: 200, rotation: 90 });
+    const gap = group.querySelector('[data-stroke="white"]')!;
+    expect(JSON.parse(gap.getAttribute("data-points")!)).toEqual([0, 0, 50, 0]);
+  });
+
   it("renders room labels", () => {
     const { getAllByTestId } = render(<FloorplanCanvas floorplan={sampleFloorplan} />);
     const texts = getAllByTestId("konva-text");

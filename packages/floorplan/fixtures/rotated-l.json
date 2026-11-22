@@ -1,0 +1,124 @@
+{
+	"version": 1,
+	"source": "roomplan",
+	"warnings": [],
+	"floorplan": {
+		"walls": [
+			{
+				"id": "w0",
+				"start": {
+					"x": 0.0,
+					"y": 0.0
+				},
+				"end": {
+					"x": 2.828427,
+					"y": 2.828427
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 4.0
+			},
+			{
+				"id": "w1",
+				"start": {
+					"x": 2.828427,
+					"y": 2.828427
+				},
+				"end": {
+					"x": 1.414214,
+					"y": 4.242641
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 2.0
+			},
+			{
+				"id": "w2",
+				"start": {
+					"x": 1.414214,
+					"y": 4.242641
+				},
+				"end": {
+					"x": 0.0,
+					"y": 2.828427
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 2.0
+			},
+			{
+				"id": "w3",
+				"start": {
+					"x": 0.0,
+					"y": 2.828427
+				},
+				"end": {
+					"x": -1.414214,
+					"y": 4.242641
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 2.0
+			},
+			{
+				"id": "w4",
+				"start": {
+					"x": -1.414214,
+					"y": 4.242641
+				},
+				"end": {
+					"x": -2.828427,
+					"y": 2.828427
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 2.0
+			},
+			{
+				"id": "w5",
+				"start": {
+					"x": -2.828427,
+					"y": 2.828427
+				},
+				"end": {
+					"x": 0.0,
+					"y": 0.0
+				},
+				"thickness_m": 0.12,
+				"height_m": 2.4,
+				"length_m": 4.0
+			}
+		],
+		"rooms": [
+			{
+				"id": "r1",
+				"name": "Studio",
+				"type": "other",
+				"width_m": 4,
+				"length_m": 4,
+				"height_m": 2.4,
+				"polygon": [
+					[0.0, 0.0],
+					[2.828427, 2.828427],
+					[1.414214, 4.242641],
+					[0.0, 2.828427],
+					[-1.414214, 4.242641],
+					[-2.828427, 2.828427]
+				],
+				"walls": ["w0", "w1", "w2", "w3", "w4", "w5"]
+			}
+		],
+		"doors": [
+			{
+				"id": "d1",
+				"wall_id": "w0",
+				"position_along_m": 2,
+				"width_m": 0.9,
+				"type": "standard"
+			}
+		],
+		"windows": [],
+		"dimensions": [],
+		"total_area_m2": 12
+	}
+}

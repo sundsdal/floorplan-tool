@@ -1,0 +1,450 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */; };
+		488ED675BD25C401C5F7008B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */; };
+		964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */; };
+		9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24CB24A93EE055427841733 /* RoomplanApp.swift */; };
+		A164A91177309BAFF53DA7F2 /* GeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */; };
+		D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */; };
+		E8CC2ED744FC3A970CF3AC94 /* rotated-l.json in Resources */ = {isa = PBXBuildFile; fileRef = 20A3987AD3EE2275D6B92CEA /* rotated-l.json */; };
+		ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B627225241963440D022D189 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 94DA85B9571AA9091FDDDD1D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 04ED7705CC8E1626286BAAB6;
+			remoteInfo = Roomplan;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		20A3987AD3EE2275D6B92CEA /* rotated-l.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rotated-l.json"; sourceTree = "<group>"; };
+		518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureStore.swift; sourceTree = "<group>"; };
+		74136102206A16C8DE923420 /* RoomplanTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RoomplanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9939679621458CF134656D46 /* Roomplan.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Roomplan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorplanDocument.swift; sourceTree = "<group>"; };
+		B24CB24A93EE055427841733 /* RoomplanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomplanApp.swift; sourceTree = "<group>"; };
+		E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGRenderer.swift; sourceTree = "<group>"; };
+		E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanConverter.swift; sourceTree = "<group>"; };
+		EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeometryTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		05453098BCEE6AAE95396045 /* Geometry */ = {
+			isa = PBXGroup;
+			children = (
+				9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */,
+				E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */,
+				E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */,
+			);
+			path = Geometry;
+			sourceTree = "<group>";
+		};
+		2F815CB817AA3C6FAEAF2349 /* RoomplanTests */ = {
+			isa = PBXGroup;
+			children = (
+				FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */,
+			);
+			path = RoomplanTests;
+			sourceTree = "<group>";
+		};
+		3D56FB2BBFF3997960D04CBA = {
+			isa = PBXGroup;
+			children = (
+				9D3D692D7ADE95C7906FB0D7 /* fixtures */,
+				5EB94CE83E0C957247E70DD1 /* Roomplan */,
+				2F815CB817AA3C6FAEAF2349 /* RoomplanTests */,
+				4558DFF035FF4FF61A049405 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4558DFF035FF4FF61A049405 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9939679621458CF134656D46 /* Roomplan.app */,
+				74136102206A16C8DE923420 /* RoomplanTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5EB94CE83E0C957247E70DD1 /* Roomplan */ = {
+			isa = PBXGroup;
+			children = (
+				518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */,
+				EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */,
+				B24CB24A93EE055427841733 /* RoomplanApp.swift */,
+				05453098BCEE6AAE95396045 /* Geometry */,
+			);
+			path = Roomplan;
+			sourceTree = "<group>";
+		};
+		9D3D692D7ADE95C7906FB0D7 /* fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				20A3987AD3EE2275D6B92CEA /* rotated-l.json */,
+			);
+			name = fixtures;
+			path = ../../packages/floorplan/fixtures;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		04ED7705CC8E1626286BAAB6 /* Roomplan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 049516514ADDF9C99F3D0C95 /* Build configuration list for PBXNativeTarget "Roomplan" */;
+			buildPhases = (
+				08F4B5FE64611DF7E4DB1E2E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Roomplan;
+			packageProductDependencies = (
+			);
+			productName = Roomplan;
+			productReference = 9939679621458CF134656D46 /* Roomplan.app */;
+			productType = "com.apple.product-type.application";
+		};
+		ECA2802BFA9635E8496FAE39 /* RoomplanTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 222E950E0540BC12AD6FF196 /* Build configuration list for PBXNativeTarget "RoomplanTests" */;
+			buildPhases = (
+				33F79F96691CCB64CA7CF5B1 /* Sources */,
+				1045E9C24AC67D198EE5420D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A03E0154B9ADE5FD7BBC9765 /* PBXTargetDependency */,
+			);
+			name = RoomplanTests;
+			packageProductDependencies = (
+			);
+			productName = RoomplanTests;
+			productReference = 74136102206A16C8DE923420 /* RoomplanTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		94DA85B9571AA9091FDDDD1D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					04ED7705CC8E1626286BAAB6 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 012A2AAFD26B7E4D008236DB /* Build configuration list for PBXProject "Roomplan" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3D56FB2BBFF3997960D04CBA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				04ED7705CC8E1626286BAAB6 /* Roomplan */,
+				ECA2802BFA9635E8496FAE39 /* RoomplanTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1045E9C24AC67D198EE5420D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E8CC2ED744FC3A970CF3AC94 /* rotated-l.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		08F4B5FE64611DF7E4DB1E2E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */,
+				488ED675BD25C401C5F7008B /* ContentView.swift in Sources */,
+				D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */,
+				ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */,
+				9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */,
+				964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		33F79F96691CCB64CA7CF5B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A164A91177309BAFF53DA7F2 /* GeometryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A03E0154B9ADE5FD7BBC9765 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 04ED7705CC8E1626286BAAB6 /* Roomplan */;
+			targetProxy = B627225241963440D022D189 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1C8AFB8484B9BF743554AFC5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Floorplan Scan";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan rooms with RoomPlan.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.floorplan.roomplan;
+				PRODUCT_NAME = Roomplan;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4E3644A826EC4FD12209EEA9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Floorplan Scan";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan rooms with RoomPlan.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.floorplan.roomplan;
+				PRODUCT_NAME = Roomplan;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		531F0583A772E7832D2CF76B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B3F781DE7C39E13509EE4321 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C0F3215904E30F61D82C4A1A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.floorplan.roomplan.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Roomplan.app/Roomplan";
+			};
+			name = Debug;
+		};
+		DB0DF370A0B3B00742D9A97A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.floorplan.roomplan.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Roomplan.app/Roomplan";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		012A2AAFD26B7E4D008236DB /* Build configuration list for PBXProject "Roomplan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3F781DE7C39E13509EE4321 /* Debug */,
+				531F0583A772E7832D2CF76B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		049516514ADDF9C99F3D0C95 /* Build configuration list for PBXNativeTarget "Roomplan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4E3644A826EC4FD12209EEA9 /* Debug */,
+				1C8AFB8484B9BF743554AFC5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		222E950E0540BC12AD6FF196 /* Build configuration list for PBXNativeTarget "RoomplanTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C0F3215904E30F61D82C4A1A /* Debug */,
+				DB0DF370A0B3B00742D9A97A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 94DA85B9571AA9091FDDDD1D /* Project object */;
+}

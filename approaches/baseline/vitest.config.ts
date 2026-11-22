@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    include: ["**/*.{test,spec}.{ts,tsx}", "../../packages/floorplan/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: ["./vitest.setup.ts"],
   },
   resolve: {

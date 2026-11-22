@@ -1,0 +1,35 @@
+name: Roomplan
+options:
+  deploymentTarget:
+    iOS: '26.0'
+targets:
+  Roomplan:
+    type: application
+    platform: iOS
+    sources:
+      - Roomplan
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.floorplan.roomplan
+        SWIFT_VERSION: '6.0'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Floorplan Scan
+        INFOPLIST_KEY_NSCameraUsageDescription: Camera access is required to scan rooms with RoomPlan.
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1,2'
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_NAME: Roomplan
+  RoomplanTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - RoomplanTests
+      - path: ../../packages/floorplan/fixtures/rotated-l.json
+        buildPhase: resources
+    dependencies:
+      - target: Roomplan
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.floorplan.roomplan.tests
+        SWIFT_VERSION: '6.0'
+        GENERATE_INFOPLIST_FILE: YES

@@ -10,9 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock next/dynamic to just render the component directly
 vi.mock("next/dynamic", () => ({
-	default: (loader: () => Promise<any>) => {
+	default: (
+		loader: () => Promise<{
+			default: React.ComponentType<Record<string, unknown>>;
+		}>,
+	) => {
 		const Component = React.lazy(loader);
-		return function DynamicWrapper(props: any) {
+		return function DynamicWrapper(props: Record<string, unknown>) {
 			return (
 				<React.Suspense fallback={null}>
 					<Component {...props} />
@@ -25,18 +29,22 @@ vi.mock("next/dynamic", () => ({
 // Mock react-konva
 vi.mock("react-konva", () => {
 	const createMockComponent = (name: string) =>
-		React.forwardRef(({ children, ...props }: any, ref: any) => (
-			<div data-testid={`konva-${name.toLowerCase()}`} ref={ref}>
-				{children}
-			</div>
-		));
+		React.forwardRef<HTMLDivElement, { children?: React.ReactNode }>(
+			({ children }, ref) => (
+				<div data-testid={`konva-${name.toLowerCase()}`} ref={ref}>
+					{children}
+				</div>
+			),
+		);
 	return {
 		Stage: createMockComponent("Stage"),
 		Layer: createMockComponent("Layer"),
 		Line: () => <div data-testid="konva-line" />,
 		Arc: () => <div data-testid="konva-arc" />,
-		Text: ({ text }: any) => <div data-testid="konva-text">{text}</div>,
-		Group: ({ children }: any) => (
+		Text: ({ text }: { text: string }) => (
+			<div data-testid="konva-text">{text}</div>
+		),
+		Group: ({ children }: { children?: React.ReactNode }) => (
 			<div data-testid="konva-group">{children}</div>
 		),
 		Rect: () => <div data-testid="konva-rect" />,
@@ -405,5 +413,40 @@ describe("SSE event parsing (Generate flow)", () => {
 		);
 		const formData = fetchMock.mock.calls[0][1].body as FormData;
 		expect(formData.get("video")).toBeTruthy();
+	});
+});
+
+describe("Floor plan import", () => {
+	it("loads a RoomPlan document locally with its source and warnings", async () => {
+		const fixture = (
+			await import("../../../packages/floorplan/fixtures/rotated-l.json")
+		).default;
+		const document = { ...fixture, warnings: ["Check this doorway"] };
+		render(<Home />);
+		const input = screen.getByLabelText("Import floor plan JSON");
+		const file = new File([], "plan.json", { type: "application/json" });
+		Object.defineProperty(file, "text", {
+			value: async () => JSON.stringify(document),
+		});
+		await act(async () => {
+			fireEvent.change(input, { target: { files: [file] } });
+		});
+		expect(screen.getByText("Source: RoomPlan scan")).toBeInTheDocument();
+		expect(screen.getByText("Check this doorway")).toBeInTheDocument();
+		expect(screen.getByText("Export JSON")).toBeInTheDocument();
+	});
+
+	it("reports invalid documents without replacing the current plan", async () => {
+		render(<Home />);
+		const input = screen.getByLabelText("Import floor plan JSON");
+		const file = new File([], "bad.json", { type: "application/json" });
+		Object.defineProperty(file, "text", { value: async () => "not json" });
+		await act(async () => {
+			fireEvent.change(input, { target: { files: [file] } });
+		});
+		expect(screen.getByRole("alert")).toBeInTheDocument();
+		expect(
+			screen.getByText("Your floorplan will appear here"),
+		).toBeInTheDocument();
 	});
 });

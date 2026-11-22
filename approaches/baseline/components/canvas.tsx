@@ -44,7 +44,7 @@ function DoorShape({ door, walls }: { door: Door; walls: Wall[] }) {
   const dx = wall.end.x - wall.start.x;
   const dy = wall.end.y - wall.start.y;
   const len = Math.sqrt(dx * dx + dy * dy);
-  const ratio = door.position_along_m / (len || 1);
+  const ratio = (door.position_along_m - door.width_m / 2) / (len || 1);
   const x = (wall.start.x + dx * ratio) * SCALE;
   const y = (wall.start.y + dy * ratio) * SCALE;
   const angle = Math.atan2(dy, dx) * (180 / Math.PI);
