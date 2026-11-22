@@ -14,20 +14,7 @@ type Session = {
 };
 export type Scene = {
 	revision: number;
-	floorplan: {
-		walls: {
-			id: string;
-			start: { x: number; y: number };
-			end: { x: number; y: number };
-		}[];
-		doors: {
-			id: string;
-			wall_id: string;
-			position_along_m: number;
-			width_m: number;
-		}[];
-		rooms: { id: string; name: string; polygon: [number, number][] }[];
-	};
+	floorplan: import("../../lib/types").FloorplanState;
 	nodes: Record<string, unknown>;
 	proposals: { id: string; [key: string]: unknown }[];
 	evidence: unknown[];

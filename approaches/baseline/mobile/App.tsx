@@ -14,7 +14,7 @@ import {
 	View,
 } from "react-native";
 import { LiveGuide, type Scene } from "./src/live";
-import { Plan } from "./src/Plan";
+import { Plan, PlanDetails } from "./src/Plan";
 
 export default function App() {
 	const [server, setServer] = useState(
@@ -254,6 +254,7 @@ export default function App() {
 							setShotStart(undefined);
 						}}
 					/>
+					<PlanDetails floorplan={scene?.floorplan} />
 					{selected && (
 						<Text style={styles.guideText}>Selected: {selected}</Text>
 					)}
@@ -299,6 +300,10 @@ export default function App() {
 									Proposed change · orange shows changed or added elements
 								</Text>
 								<Plan
+									floorplan={proposal.floorplan as Scene["floorplan"]}
+									compareTo={scene.floorplan}
+								/>
+								<PlanDetails
 									floorplan={proposal.floorplan as Scene["floorplan"]}
 									compareTo={scene.floorplan}
 								/>
