@@ -23,6 +23,9 @@ export class LiveGuide {
 	private room = new Room();
 	private session?: Session;
 	private closed = false;
+	private closing?: Promise<void>;
+	private recordingRequest?: Promise<number | null>;
+	private cancelRetry?: () => void;
 	private recordingStartedAt?: number;
 	constructor(
 		private base: string,
@@ -57,11 +60,13 @@ export class LiveGuide {
 					);
 			});
 			this.room.on(RoomEvent.ParticipantConnected, (participant) => {
+				if (this.closed) return;
 				if (participant.kind === ParticipantKind.AGENT)
 					this.handlers.status(true);
 				void this.sendRecordingStart();
 			});
 			this.room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+				if (this.closed) return;
 				if (participant.kind === ParticipantKind.AGENT)
 					this.handlers.status(false);
 			});
@@ -71,7 +76,7 @@ export class LiveGuide {
 			this.room.on(
 				RoomEvent.DataReceived,
 				(payload, _participant, _kind, topic) => {
-					if (topic !== "floorplan.finding") return;
+					if (this.closed || topic !== "floorplan.finding") return;
 					try {
 						const value = JSON.parse(new TextDecoder().decode(payload));
 						this.handlers.finding(
@@ -131,7 +136,19 @@ export class LiveGuide {
 			throw error;
 		}
 	}
-	private async startRecording(): Promise<number | null> {
+	private startRecording(): Promise<number | null> {
+		if (this.closed) return Promise.resolve(null);
+		const request = this.requestRecording();
+		this.recordingRequest = request;
+		void request
+			.finally(() => {
+				if (this.recordingRequest === request)
+					this.recordingRequest = undefined;
+			})
+			.catch(() => {});
+		return request;
+	}
+	private async requestRecording(): Promise<number | null> {
 		if (!this.session) return null;
 		const response = await this.request(
 			`/api/livekit/session/${encodeURIComponent(this.session.sessionId)}/recording`,
@@ -152,7 +169,18 @@ export class LiveGuide {
 			} catch {
 				/* Retry while the recording starts. */
 			}
-			await new Promise((resolve) => setTimeout(resolve, 2000));
+			if (this.closed) return;
+			await new Promise<void>((resolve) => {
+				const timer = setTimeout(() => {
+					this.cancelRetry = undefined;
+					resolve();
+				}, 2000);
+				this.cancelRetry = () => {
+					clearTimeout(timer);
+					this.cancelRetry = undefined;
+					resolve();
+				};
+			});
 		}
 		if (!this.closed)
 			this.handlers.finding(
@@ -180,17 +208,32 @@ export class LiveGuide {
 	async finalize() {
 		if (!this.session)
 			throw new Error("The walkthrough session has not started.");
+		await this.close().catch(() => {});
+		// A recording start already sent to the server must finish before the
+		// finalization request, or it could create an egress after finalization.
+		await this.recordingRequest?.catch(() => {});
 		const response = await this.request(
 			`/api/livekit/session/${encodeURIComponent(this.session.sessionId)}/finalize`,
 			this.session.sessionToken,
 		);
 		return response.text();
 	}
-	async close() {
+	close() {
+		if (this.closing) return this.closing;
 		this.closed = true;
+		this.cancelRetry?.();
 		this.handlers.preview(undefined);
 		this.handlers.status(false);
-		await this.room.disconnect();
-		await AudioSession.stopAudioSession();
+		for (const publication of this.room.localParticipant.trackPublications.values()) {
+			publication.track?.stop();
+		}
+		this.closing = (async () => {
+			try {
+				await this.room.disconnect();
+			} finally {
+				await AudioSession.stopAudioSession();
+			}
+		})();
+		return this.closing;
 	}
 }

@@ -12,6 +12,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      "@livekit/react-native": path.resolve(__dirname, "__tests__/mocks/mobile-livekit-native.ts"),
+      "livekit-client": path.resolve(__dirname, "__tests__/mocks/mobile-livekit-client.ts"),
     },
   },
 });

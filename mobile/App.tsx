@@ -80,11 +80,9 @@ export default function App() {
 			setResult(
 				`Floor plan ready.\n${JSON.stringify(data.floorplan, null, 2)}`,
 			);
-			await client.close();
 			guide.current = null;
 			setAnalysisPending(false);
 		} catch {
-			await client.close();
 			setError("Recording stopped. Analysis is not ready; please retry.");
 			setResult("");
 		} finally {
