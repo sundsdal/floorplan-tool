@@ -1,10 +1,6 @@
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 
-import {
-	createDocument,
-	type FloorplanDocument,
-	renderSVG,
-} from "@floorplan/core";
+import { createDocument, renderSVG } from "@floorplan/core";
 import { VideoView } from "@livekit/react-native";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
@@ -23,6 +19,7 @@ import {
 import { SvgXml } from "react-native-svg";
 import { LiveGuide, type Scene } from "./src/live";
 import { Plan, PlanDetails } from "./src/Plan";
+import { exportReview, finalScene, reviewDocument } from "./src/review";
 
 export default function App() {
 	const [server, setServer] = useState(
@@ -37,9 +34,10 @@ export default function App() {
 	const [question, setQuestion] = useState("");
 	const [finding, setFinding] = useState("");
 	const [error, setError] = useState("");
-	const [result, setResult] = useState<FloorplanDocument | null>(null);
+	const [finalWarnings, setFinalWarnings] = useState<string[] | null>(null);
 	const [zoom, setZoom] = useState(1);
 	const [scene, setScene] = useState<Scene>();
+	const result = reviewDocument(scene, finalWarnings);
 	const [selected, setSelected] = useState<string>();
 	const [shotStart, setShotStart] = useState<number>();
 	const guide = useRef<LiveGuide | null>(null);
@@ -55,7 +53,7 @@ export default function App() {
 	const start = async () => {
 		setBusy(true);
 		setError("");
-		setResult(null);
+		setFinalWarnings(null);
 		setFinding("");
 		setTranscript("");
 		setScene(undefined);
@@ -89,6 +87,12 @@ export default function App() {
 			},
 			scene: (next) => {
 				if (guide.current !== client) return;
+				try {
+					createDocument(next.floorplan, "video");
+				} catch {
+					setError("Could not load the plan.");
+					return;
+				}
 				if (
 					reviewRevision.current !== null &&
 					next.revision > reviewRevision.current
@@ -96,6 +100,8 @@ export default function App() {
 					reviewRevision.current = null;
 					setReviewing(false);
 				}
+				if (next.revision < sceneRevision.current) return;
+				sceneRevision.current = next.revision;
 				setScene((old) => (!old || next.revision >= old.revision ? next : old));
 			},
 		});
@@ -117,27 +123,23 @@ export default function App() {
 		setRecording(false);
 		setAnalysisPending(true);
 		setError("");
-		setResult(null);
+		setFinalWarnings(null);
+		const revisionAtFinalize = sceneRevision.current;
 		try {
 			const data = JSON.parse(await client.finalize()) as {
-				floorplan: Parameters<typeof createDocument>[0];
+				floorplan: Scene["floorplan"];
 				warnings?: string[];
 			};
-			setScene((old) => ({
-				revision: old?.revision ?? 0,
-				floorplan: data.floorplan as Scene["floorplan"],
-				nodes: old?.nodes ?? {},
-				proposals: old?.proposals ?? [],
-				evidence: old?.evidence ?? [],
-			}));
+			if (guide.current !== client) return;
 			const document = createDocument(data.floorplan, "video");
-			setResult({ ...document, warnings: data.warnings ?? document.warnings });
+			setScene((old) => finalScene(old, data.floorplan, revisionAtFinalize));
+			setFinalWarnings(data.warnings ?? document.warnings);
 			setZoom(1);
 			await client.refreshScene().catch(() => {});
 			setAnalysisPending(false);
 		} catch {
 			setError("Recording stopped. Analysis is not ready; please retry.");
-			setResult(null);
+			setFinalWarnings(null);
 		} finally {
 			setBusy(false);
 		}
@@ -149,9 +151,7 @@ export default function App() {
 				throw new Error("Sharing is unavailable on this device.");
 			const file = new File(Paths.cache, `floorplan.${format}`);
 			file.create({ overwrite: true });
-			file.write(
-				format === "svg" ? renderSVG(result) : JSON.stringify(result, null, 2),
-			);
+			file.write(exportReview(result, format));
 			await Sharing.shareAsync(file.uri, {
 				mimeType: format === "svg" ? "image/svg+xml" : "application/json",
 			});

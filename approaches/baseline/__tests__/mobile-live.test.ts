@@ -1,4 +1,8 @@
+import { parseDocument } from "@floorplan/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import fixture from "../../../packages/floorplan/fixtures/rotated-l.json";
+import { exportReview, reviewDocument } from "../mobile/src/review";
+import type { Scene } from "../mobile/src/scene";
 
 const mocks = vi.hoisted(() => ({
 	disconnect: vi.fn(),
@@ -106,11 +110,14 @@ describe("mobile scene synchronization", () => {
 		const { LiveGuide } = await import(/* @vite-ignore */ modulePath);
 		const scene = {
 			revision: 1,
-			floorplan: {},
+			floorplan: parseDocument(fixture).floorplan,
 			nodes: {},
 			proposals: [],
 			evidence: [],
 		};
+		const accepted = structuredClone(scene);
+		accepted.revision = 2;
+		accepted.floorplan.rooms[0].name = "Accepted room";
 		const fetchMock = vi.fn(async (url: string, _options?: RequestInit) => {
 			if (url.endsWith("/session"))
 				return Response.json({
@@ -122,11 +129,14 @@ describe("mobile scene synchronization", () => {
 			if (url.endsWith("/recording"))
 				return Response.json({ startedAt: Date.now() });
 			if (url.includes("/proposals/"))
-				return Response.json({ scene: { ...scene, revision: 2 } });
+				return Response.json({ scene: accepted });
 			return Response.json({ scene });
 		});
 		vi.stubGlobal("fetch", fetchMock);
-		const onScene = vi.fn();
+		let currentScene: Scene | undefined;
+		const onScene = vi.fn((next: Scene) => {
+			currentScene = next;
+		});
 		const guide = new LiveGuide("https://example.com", {
 			status: vi.fn(),
 			preview: vi.fn(),
@@ -167,6 +177,13 @@ describe("mobile scene synchronization", () => {
 		expect(onScene).toHaveBeenLastCalledWith(
 			expect.objectContaining({ revision: 2 }),
 		);
+		const result = reviewDocument(currentScene, ["Final warning"]);
+		if (!result) throw new Error("Missing final review");
+		expect(result.floorplan.rooms[0].name).toBe("Accepted room");
+		expect(exportReview(result, "svg")).toContain("Accepted room");
+		expect(
+			JSON.parse(exportReview(result, "json")).floorplan.rooms[0].name,
+		).toBe("Accepted room");
 		vi.unstubAllGlobals();
 	});
 });

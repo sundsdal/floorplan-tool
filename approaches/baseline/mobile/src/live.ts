@@ -12,13 +12,11 @@ type Session = {
 	token: string;
 	sessionToken: string;
 };
-export type Scene = {
-	revision: number;
-	floorplan: import("../../lib/types").FloorplanState;
-	nodes: Record<string, unknown>;
-	proposals: { id: string; [key: string]: unknown }[];
-	evidence: unknown[];
-};
+
+import type { Scene } from "./scene";
+
+export type { Scene } from "./scene";
+
 type Handlers = {
 	status: (connected: boolean, error?: string) => void;
 	preview: (track: LocalVideoTrack | undefined) => void;
