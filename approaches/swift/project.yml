@@ -10,6 +10,7 @@ targets:
       - Roomplan
     settings:
       base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.floorplan.roomplan
         SWIFT_VERSION: '6.0'
         GENERATE_INFOPLIST_FILE: YES

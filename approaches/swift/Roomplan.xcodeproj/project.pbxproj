@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */; };
 		488ED675BD25C401C5F7008B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */; };
+		8085607931A95535BBBBE2A6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D3602976A827ED45303FBAA /* Assets.xcassets */; };
 		964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */; };
 		9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24CB24A93EE055427841733 /* RoomplanApp.swift */; };
 		A164A91177309BAFF53DA7F2 /* GeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */; };
@@ -28,6 +29,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0D3602976A827ED45303FBAA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20A3987AD3EE2275D6B92CEA /* rotated-l.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rotated-l.json"; sourceTree = "<group>"; };
 		518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureStore.swift; sourceTree = "<group>"; };
 		74136102206A16C8DE923420 /* RoomplanTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RoomplanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -81,6 +83,7 @@
 		5EB94CE83E0C957247E70DD1 /* Roomplan */ = {
 			isa = PBXGroup;
 			children = (
+				0D3602976A827ED45303FBAA /* Assets.xcassets */,
 				518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */,
 				EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */,
 				B24CB24A93EE055427841733 /* RoomplanApp.swift */,
@@ -106,6 +109,7 @@
 			buildConfigurationList = 049516514ADDF9C99F3D0C95 /* Build configuration list for PBXNativeTarget "Roomplan" */;
 			buildPhases = (
 				08F4B5FE64611DF7E4DB1E2E /* Sources */,
+				3C6399439C520486097B950B /* Resources */,
 			);
 			buildRules = (
 			);
@@ -177,6 +181,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				E8CC2ED744FC3A970CF3AC94 /* rotated-l.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3C6399439C520486097B950B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8085607931A95535BBBBE2A6 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
