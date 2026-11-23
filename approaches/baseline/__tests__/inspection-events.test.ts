@@ -39,6 +39,112 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 describe("linked inspection delivery", () => {
+	it("accepts another photo for an already saved request without replacing it", async () => {
+		let state = "",
+			generation = 0,
+			lose = false;
+		const photos: unknown[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: string | URL, init: RequestInit) => {
+				const url = new URL(input);
+				if (url.origin === link.origin) {
+					const { event } = JSON.parse(String(init.body));
+					if (event.type === "evidence.saved") {
+						photos.push(event);
+						if (lose) {
+							lose = false;
+							throw Error("lost response");
+						}
+					}
+					return new Response(null, { status: 204 });
+				}
+				if (init.method === "POST") {
+					if (+String(url.searchParams.get("ifGenerationMatch")) !== generation)
+						return new Response(null, { status: 412 });
+					generation++;
+					state = String(init.body);
+					return new Response(null, { status: 200 });
+				}
+				return new Response(state, {
+					status: state ? 200 : 404,
+					headers: { "x-goog-generation": String(generation) },
+				});
+			}),
+		);
+		const session = visitSessionId(link);
+		await bindVisit(session, link);
+		const make = (type: string, data: unknown, roomId = room) =>
+			inspectionEvent.parse({
+				id: randomUUID(),
+				capturedAt: Date.now(),
+				type,
+				data,
+				roomId,
+			});
+		await appendEvent(session, make("room.upsert", { name: "Kitchen" }));
+		await appendEvent(
+			session,
+			make("evidence.requested", { requestId, target: "under_sink" }),
+		);
+		const first = make("evidence.saved", {
+			requestId,
+			target: "under_sink",
+			jpeg: "/9j/2Q==",
+			seconds: 12,
+		});
+		const second = make("evidence.saved", {
+			requestId,
+			target: "under_sink",
+			jpeg: "/9gB/9k=",
+		});
+		lose = true;
+		await expect(appendEvent(session, first)).rejects.toThrow("lost response");
+		await appendEvent(session, second);
+		await appendEvent(session, second);
+		expect(photos).toEqual([first, first]);
+		expect(
+			(await allEvents(session)).filter((e) => e.type === "evidence.saved"),
+		).toHaveLength(1);
+		await expect(
+			appendEvent(
+				session,
+				make("evidence.saved", {
+					requestId,
+					target: "ventilation",
+					jpeg: "/9j/2Q==",
+				}),
+			),
+		).rejects.toThrow("Unknown request");
+		await expect(
+			appendEvent(
+				session,
+				make(
+					"evidence.saved",
+					{ requestId, target: "under_sink", jpeg: "/9j/2Q==" },
+					randomUUID(),
+				),
+			),
+		).rejects.toThrow("Unknown request");
+		await expect(
+			appendEvent(
+				session,
+				inspectionEvent.parse({
+					...first,
+					data: { ...first.data, jpeg: "/9gB/9k=" },
+				}),
+			),
+		).rejects.toThrow("Conflicting event ID");
+		await expect(
+			appendEvent(
+				session,
+				inspectionEvent.parse({
+					...second,
+					data: { ...second.data, jpeg: "/9j/2Q==" },
+				}),
+			),
+		).rejects.toThrow("Conflicting event ID");
+	});
 	it("recovers the same PATCH after an ambiguous job-card acknowledgement and replays canonical room names", async () => {
 		let state = "",
 			generation = 0,

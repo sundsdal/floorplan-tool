@@ -114,6 +114,7 @@ function digest(e: Event) {
 type Journal = {
 	link: Link;
 	events: StoredEntry[];
+	aliases?: Record<string, { digest: string; savedId: string }>;
 	pending?: Event;
 	boundAt: number;
 };
@@ -278,6 +279,7 @@ export function validateTransition(events: Entry[], e: Event) {
 		)
 			throw new Conflict("Unknown request");
 		if (
+			e.type !== "evidence.saved" &&
 			events.some(
 				(x) => x.type === "evidence.saved" && x.data.requestId === requestId,
 			)
@@ -340,7 +342,30 @@ export async function appendEvent(sessionId: string, e: Event) {
 				throw new Conflict("Conflicting event ID");
 			return existing;
 		}
+		const alias = state.aliases?.[e.id];
+		if (alias) {
+			if (alias.digest !== digest(e))
+				throw new Conflict("Conflicting event ID");
+			const saved = state.events.find((x) => x.id === alias.savedId);
+			if (!saved) throw new Error("Missing saved evidence");
+			return saved;
+		}
 		validateTransition(state.events, e);
+		if (e.type === "evidence.saved") {
+			const saved = state.events.find(
+				(x) =>
+					x.type === "evidence.saved" &&
+					x.data.requestId === e.data.requestId &&
+					x.roomId === e.roomId &&
+					x.data.target === e.data.target,
+			);
+			if (saved) {
+				state.aliases ??= {};
+				state.aliases[e.id] = { digest: digest(e), savedId: saved.id };
+				if (await store(sessionId, state, generation)) return saved;
+				continue;
+			}
+		}
 		if (
 			[
 				"room.upsert",
