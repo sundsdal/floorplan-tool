@@ -118,7 +118,11 @@ function clients() {
 		egress: new EgressClient(c.url, c.key, c.secret),
 	};
 }
-export async function createSession() {
+export type CaptureMode =
+	| { mode: "inspection"; work: "male" | "slipe" }
+	| { mode?: "floorplan" };
+
+export async function createSession(options: CaptureMode = {}) {
 	const { c, room, dispatch } = clients();
 	const sessionId = randomUUID();
 	const roomId = roomName(sessionId);
@@ -134,6 +138,7 @@ export async function createSession() {
 				sessionId,
 				participantIdentity: identity,
 				reviewToken: capability(sessionId, "review"),
+				...(options.mode === "inspection" ? options : {}),
 			}),
 		});
 		const access = new AccessToken(c.key, c.secret, {
@@ -154,6 +159,7 @@ export async function createSession() {
 			serverUrl: c.url,
 			token: await access.toJwt(),
 			sessionToken: capability(sessionId, "session"),
+			...(process.env.LIVEKIT_KEEPALIVE === "true" ? { keepalive: true } : {}),
 		};
 	} catch (error) {
 		await room.deleteRoom(roomId).catch(() => {});

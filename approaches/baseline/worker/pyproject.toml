@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
-    "livekit-agents[google]>=1.8.13,<2",
+    "livekit-agents[google,images]>=1.8.13,<2",
 ]
 
 [project.scripts]
