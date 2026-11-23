@@ -145,16 +145,22 @@ function reader(sessionId: string): Reader {
 		return Buffer.from(await res.arrayBuffer());
 	};
 }
+export async function hasFinalRecording(sessionId: string) {
+	try {
+		const playlist = (await reader(sessionId)("recording.m3u8")).toString(
+			"utf8",
+		);
+		return (
+			playlist.startsWith("#EXTM3U") && playlist.includes("#EXT-X-ENDLIST")
+		);
+	} catch (error) {
+		if (error instanceof RecordingNotReady) return false;
+		throw error;
+	}
+}
 export async function waitForFinalRecording(sessionId: string) {
-	const read = reader(sessionId);
 	for (let attempt = 0; attempt < 6; attempt++) {
-		try {
-			const playlist = (await read("recording.m3u8")).toString("utf8");
-			if (playlist.startsWith("#EXTM3U") && playlist.includes("#EXT-X-ENDLIST"))
-				return;
-		} catch (error) {
-			if (!(error instanceof RecordingNotReady)) throw error;
-		}
+		if (await hasFinalRecording(sessionId)) return;
 		if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 1000));
 	}
 	throw new RecordingNotReady();
@@ -177,6 +183,13 @@ async function usingMedia<T>(
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}
+}
+export function withRecordingRange<T>(
+	sessionId: string,
+	range: Range,
+	callback: (file: string) => Promise<T>,
+) {
+	return usingMedia(sessionId, [range], ([file]) => callback(file));
 }
 /** Materialize the full committed video up to the requested inspection checkpoint. */
 export function withInspectionVideo<T>(

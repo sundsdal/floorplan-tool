@@ -4,6 +4,34 @@ import XCTest
 @testable import Roomplan
 
 final class GeometryTests: XCTestCase {
+  @MainActor func testFinalRoomsIncludeResumedAndNewRoomsWithPreservedOffsets() throws {
+    let stored = ["old": 12.5]
+    var times = try JSONDecoder().decode([String: Double].self, from: JSONEncoder().encode(stored))
+    times["new"] = 42
+    let result = InspectionGuide.finalRooms([("old", "Renamed"), ("new", "New"), ("legacy", "Legacy")], times: times)
+    let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [[String: Any]])
+    XCTAssertEqual(json.map { $0["roomId"] as? String }, ["old", "new", "legacy"])
+    XCTAssertEqual(json[0]["name"] as? String, "Renamed")
+    XCTAssertEqual(json[0]["seconds"] as? Double, 12.5)
+    XCTAssertEqual(json[1]["seconds"] as? Double, 42)
+    XCTAssertNil(json[2]["seconds"])
+  }
+
+  func testRevisitUsesNamedRoomAndRejectsAmbiguousMatches() {
+    let polygon = [LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3)]
+    let named = SpatialRoom(id: "stable-id", name: "Kjøkken", polygon: polygon)
+    XCTAssertNil(knownRoom(at: LiveMapPoint(5, 1), in: [named]))
+    let revisit = knownRoom(at: LiveMapPoint(2, 1), in: [named])
+    XCTAssertEqual(revisit?.id, "stable-id")
+    XCTAssertEqual(revisit?.name, "Kjøkken")
+    XCTAssertNil(knownRoom(at: LiveMapPoint(2, 1), in: [named, named]))
+  }
+
+  func testDoorCrossingRequiresBothSidesOutsideHysteresis() {
+    XCTAssertFalse(crossedDoor(previous: -0.5, current: 0.2))
+    XCTAssertFalse(crossedDoor(previous: -0.5, current: -0.7))
+    XCTAssertTrue(crossedDoor(previous: -0.5, current: 0.5))
+  }
   func testRoomContainmentExcludesEdgesAndOutside() {
     let room = SpatialRoom(id: "room", name: "Bad", polygon: [
       LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3),
@@ -106,5 +134,37 @@ final class GeometryTests: XCTestCase {
     XCTAssertEqual(first.floorplan.walls.count, 1)
     XCTAssertEqual(first.floorplan.doors.count, 1)
     XCTAssertEqual(first.floorplan.windows.count, 1)
+  }
+}
+
+extension GeometryTests {
+  func testEndedSessionDecodesWithoutLiveKitCredentials() throws {
+    let data = Data(#"{"finalizeOnly":true,"sessionId":"old-session","sessionToken":"resume-token"}"#.utf8)
+    let session = try JSONDecoder().decode(GuideSession.self, from: data)
+    XCTAssertEqual(session.sessionId, "old-session")
+    XCTAssertEqual(session.sessionToken, "resume-token")
+    XCTAssertEqual(session.finalizeOnly, true)
+    XCTAssertFalse(session.canCapture)
+  }
+
+  func testActiveSessionRequiresLiveKitCredentials() throws {
+    let active = Data(#"{"sessionId":"active","sessionToken":"auth","serverUrl":"wss://example.test","token":"live"}"#.utf8)
+    let session = try JSONDecoder().decode(GuideSession.self, from: active)
+    XCTAssertTrue(session.canCapture)
+    let incomplete = Data(#"{"sessionId":"active","sessionToken":"auth"}"#.utf8)
+    XCTAssertFalse(try JSONDecoder().decode(GuideSession.self, from: incomplete).canCapture)
+  }
+}
+
+extension GeometryTests {
+  func testRevisitResolvesOriginalSavedRecord() throws {
+    let roomID = UUID()
+    let saved = SavedRoom(id: UUID(), name: "Kjøkken", createdAt: Date())
+    let records = [(id: roomID, saved: saved)]
+    let result = try XCTUnwrap(existingInspectionRoom(roomID, in: records))
+    XCTAssertEqual(result.id, saved.id)
+    XCTAssertEqual(result.name, "Kjøkken")
+    XCTAssertNil(existingInspectionRoom(UUID(), in: records))
+    XCTAssertNil(existingInspectionRoom(nil, in: records))
   }
 }

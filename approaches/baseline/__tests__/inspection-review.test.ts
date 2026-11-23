@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	inspectionFinalizeInput,
 	inspectionReviewInput,
 	resolveInspectionReview,
 } from "@/lib/inspection-review";
@@ -19,6 +20,14 @@ const sample = {
 	],
 };
 describe("inspection review", () => {
+	it("keeps an older saved room with no known offset in the final review", () => {
+		const rooms = [{ roomId: firstRoom, name: "Loftet" }, sample.rooms[1]];
+		const result = inspectionFinalizeInput.parse({ ...sample, rooms });
+		expect(result.rooms).toEqual(rooms);
+		expect(
+			inspectionReviewInput.safeParse({ ...result, endSeconds: 99 }).success,
+		).toBe(false);
+	});
 	it("addresses a previous room and excludes completed or unrecognized requests", () => {
 		const requests = [
 			{ roomId: secondRoom, target: "surface_detail" },

@@ -1,4 +1,9 @@
-import { inspectionContext, reviewInspection } from "@/lib/inspection-review";
+import { randomUUID } from "node:crypto";
+import { allEvents, appendEvent, Unlinked } from "@/lib/inspection-events";
+import {
+	inspectionFinalizeInput,
+	reviewInspection,
+} from "@/lib/inspection-review";
 import { RecordingNotReady, waitForFinalRecording } from "@/lib/livekit-media";
 import {
 	authorizeSession,
@@ -9,6 +14,8 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+class InvalidContext extends Error {}
 
 const finalizing = new Map<
 	string,
@@ -22,9 +29,11 @@ export async function POST(
 	const { sessionId } = await context.params;
 	if (!authorizeSession(sessionId, bearer(request)))
 		return Response.json({ error: "Unauthorized" }, { status: 401 });
-	const input = inspectionContext.safeParse(
-		await request.json().catch(() => null),
-	);
+	const input = inspectionFinalizeInput
+		.extend({
+			rooms: inspectionFinalizeInput.shape.rooms.element.array().max(100),
+		})
+		.safeParse(await request.json().catch(() => null));
 	if (!input.success)
 		return Response.json(
 			{ error: "Invalid inspection context" },
@@ -34,10 +43,118 @@ export async function POST(
 	let result = finalizing.get(sessionId);
 	if (!result) {
 		result = (async () => {
+			const events = await allEvents(sessionId).catch((e) => {
+				if (e instanceof Unlinked) return null;
+				throw e;
+			});
+			const complete = events?.find((e) => e.type === "inspection.completed");
+			if (complete)
+				return { summary: String(complete.data.summary), requests: [] };
+			const rooms = new Map(
+				payload.rooms.map((room) => [room.roomId.toLowerCase(), room]),
+			);
+			for (const event of events ?? []) {
+				if (
+					(event.type === "room.upsert" || event.type === "room.named") &&
+					event.roomId &&
+					typeof event.data.name === "string"
+				) {
+					const key = event.roomId.toLowerCase();
+					const existing = rooms.get(key);
+					rooms.set(key, {
+						...existing,
+						roomId: existing?.roomId ?? event.roomId,
+						name: event.data.name,
+					});
+				}
+			}
+			const recovered = inspectionFinalizeInput.safeParse({
+				...payload,
+				rooms: [...rooms.values()],
+			});
+			if (!recovered.success) throw new InvalidContext();
+			if (
+				events?.some(
+					(e) =>
+						e.type === "evidence.marked" &&
+						!events.some(
+							(out) =>
+								(out.type === "evidence.saved" ||
+									(out.type === "evidence.retry" &&
+										out.capturedAt >= e.capturedAt)) &&
+								out.data.requestId === e.data.requestId,
+						),
+				)
+			)
+				throw new RecordingNotReady();
 			await stopRecording(sessionId);
 			await closeSession(sessionId).catch(() => {});
 			await waitForFinalRecording(sessionId);
-			return reviewInspection(sessionId, payload);
+			const saved = events
+				?.filter((e) => e.type === "evidence.saved")
+				.map((e) => ({
+					roomId: e.roomId,
+					requestId: e.data.requestId,
+					target: e.data.target,
+				}));
+			const context = events
+				? inspectionFinalizeInput.parse({
+						...recovered.data,
+						evidence: saved,
+					})
+				: recovered.data;
+			const result = await reviewInspection(sessionId, context);
+			if (events)
+				for (const report of result.roomReports ?? []) {
+					const room = context.rooms.find(
+						(r) => r.roomId.toLowerCase() === report.roomId,
+					);
+					if (room)
+						await appendEvent(sessionId, {
+							id: randomUUID(),
+							type: "room.upsert",
+							roomId: room.roomId,
+							capturedAt: Date.now(),
+							data: { name: room.name, report: report.report },
+						});
+				}
+			const outstanding =
+				events?.filter(
+					(e) =>
+						e.type === "evidence.requested" &&
+						!saved?.some((x) => x.requestId === e.data.requestId),
+				) ?? [];
+			for (const item of outstanding) {
+				const room = context.rooms.find((r) => r.roomId === item.roomId);
+				if (
+					room &&
+					!result.requests.some(
+						(r) => r.roomId === room.roomId && r.target === item.data.target,
+					)
+				) {
+					const target =
+						inspectionFinalizeInput.shape.evidence.element.shape.target.parse(
+							item.data.target,
+						);
+					result.requests.push({
+						roomId: room.roomId,
+						target,
+						prompt: `Uavklart i ${room.name}: ${target}`,
+					});
+				}
+			}
+			if (events)
+				await appendEvent(sessionId, {
+					id: randomUUID(),
+					type: "inspection.completed",
+					capturedAt: Date.now(),
+					data: {
+						summary: [result.summary, ...result.requests.map((r) => r.prompt)]
+							.join("\n")
+							.slice(0, 2500),
+					},
+				});
+			return result;
 		})();
 		finalizing.set(sessionId, result);
 	}
@@ -48,7 +165,14 @@ export async function POST(
 	} catch (error) {
 		return Response.json(
 			{ error: "Inspection review unavailable" },
-			{ status: error instanceof RecordingNotReady ? 425 : 503 },
+			{
+				status:
+					error instanceof InvalidContext
+						? 400
+						: error instanceof RecordingNotReady
+							? 425
+							: 503,
+			},
 		);
 	} finally {
 		if (finalizing.get(sessionId) === result) finalizing.delete(sessionId);

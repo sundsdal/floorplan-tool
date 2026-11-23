@@ -243,3 +243,127 @@ async def test_live_question_forwards_uncertain_location(state):
     assert set(location) == {"capturedAt", "tracking"}
     assert "currentRoomId" not in received[0]
     await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_event_replay_names_requests_and_acknowledges_new_results():
+    spoken = []
+    coordinator = InspectionCoordinator(
+        base_url="https://example.test", token="token", session_id="session", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None,
+        answer=spoken.append,
+    )
+    ident = str(uuid.uuid4())
+    request_id = str(uuid.uuid4())
+    coordinator._apply_event({"type": "room.upsert", "roomId": ident, "data": {"name": "Rom"}})
+    coordinator._apply_event({"type": "room.named", "roomId": ident, "data": {"name": "Kjøkken", "source": "user"}})
+    coordinator._apply_event({"type": "evidence.requested", "roomId": ident,
+                              "data": {"requestId": request_id, "target": "under_sink"}})
+    coordinator.events_loaded = True
+    coordinator._apply_event({"type": "evidence.saved", "roomId": ident,
+                              "data": {"requestId": request_id, "target": "under_sink"}})
+    assert coordinator.rooms[ident]["name"] == "Kjøkken"
+    assert coordinator.evidence[0]["requestId"] == request_id
+    assert spoken == ["Dokumentasjonen er lagret."]
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_mark_evidence_requires_valid_recording_interval():
+    coordinator = InspectionCoordinator(
+        base_url="https://example.test", token="token", session_id="session", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None,
+    )
+    ident, request_id = str(uuid.uuid4()), str(uuid.uuid4())
+    coordinator.rooms[ident] = {"roomId": ident, "name": "Rom", "seconds": 0}
+    coordinator.requests[request_id] = {"roomId": ident, "target": "surface_detail"}
+    coordinator.started_at = time.time() - 10
+    assert not coordinator.mark_evidence(request_id, 5, 4)
+    assert not coordinator.mark_evidence(request_id, 1, 100)
+    assert coordinator.mark_evidence(request_id, 1, 4)
+    event = coordinator.event_queue.get_nowait()
+    assert event["type"] == "evidence.marked"
+    assert event["roomId"] == ident
+    assert event["data"] == {"requestId": request_id, "target": "surface_detail", "startSeconds": 1, "endSeconds": 4}
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_restart_replays_unfinished_mark_after_all_pages():
+    room, request_id, mark_id = (str(uuid.uuid4()) for _ in range(3))
+    events = [{"id": str(uuid.uuid4()), "type": "room.upsert", "roomId": room,
+               "data": {"name": "Rom"}, "capturedAt": 1000}]
+    events += [{"id": str(uuid.uuid4()), "type": "transcript", "data": {"role": "user", "text": "x"},
+                "capturedAt": 1000} for _ in range(99)]
+    events += [{"id": str(uuid.uuid4()), "type": "evidence.requested", "roomId": room,
+                "data": {"requestId": request_id, "target": "surface_detail"}, "capturedAt": 1000},
+               {"id": mark_id, "type": "evidence.marked", "roomId": room,
+                "data": {"requestId": request_id, "target": "surface_detail", "startSeconds": 1, "endSeconds": 3},
+                "capturedAt": 1000}]
+    posted, spoken = [], []
+    def handler(request):
+        if request.method == "GET":
+            after = int(request.url.params["after"])
+            batch = events[after:after + 100]
+            return httpx.Response(200, json={"events": batch, "cursor": after + len(batch)})
+        posted.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": posted[-1]["id"]})
+    coordinator = InspectionCoordinator(base_url="https://example.test", token="x", session_id="x", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None, answer=spoken.append,
+        transport=httpx.MockTransport(handler))
+    async with httpx.AsyncClient(transport=coordinator.transport) as client:
+        await coordinator._sync_events(client)
+        await coordinator._send_events(client)
+    assert coordinator.event_cursor == len(events)
+    assert [item["id"] for item in posted] == [mark_id]
+    assert spoken == []
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_marks_sent_ahead_of_failed_transcript():
+    seen = []
+    def handler(request):
+        event = json.loads(request.content)
+        seen.append(event)
+        return httpx.Response(503 if event["type"] == "transcript" else 200)
+    coordinator = InspectionCoordinator(base_url="https://example.test", token="x", session_id="x", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None, transport=httpx.MockTransport(handler))
+    coordinator.emit_event("transcript", {"role": "user", "text": "x"})
+    coordinator.emit_event("evidence.marked", {"requestId": str(uuid.uuid4()), "target": "surface_detail",
+                                              "startSeconds": 1, "endSeconds": 2}, str(uuid.uuid4()))
+    async with httpx.AsyncClient(transport=coordinator.transport) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await coordinator._send_events(client)
+    assert [event["type"] for event in seen] == ["evidence.marked", "transcript"]
+    assert coordinator.event_queue.get_nowait()["id"] == seen[1]["id"]
+    await coordinator.close()
+
+
+def test_room_naming_records_source_without_recording():
+    coordinator = InspectionCoordinator(base_url="https://example.test", token="x", session_id="x", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None)
+    ident = str(uuid.uuid4())
+    coordinator.rooms[ident] = {"roomId": ident, "name": "Rom", "seconds": 0}
+    assert coordinator.set_room_name(ident, "Kjøkken", "live")
+    assert coordinator.set_room_name(ident, "Bad", "user")
+    assert [coordinator.event_queue.get_nowait()["data"]["source"] for _ in range(2)] == ["live", "user"]
+
+
+@pytest.mark.asyncio
+async def test_mark_keeps_id_after_post_failure_and_retries():
+    posted = []
+    def handler(request):
+        posted.append(json.loads(request.content))
+        return httpx.Response(503 if len(posted) == 1 else 200)
+    coordinator = InspectionCoordinator(base_url="https://example.test", token="x", session_id="x", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None, transport=httpx.MockTransport(handler))
+    coordinator.emit_event("evidence.marked", {"requestId": str(uuid.uuid4()), "target": "surface_detail",
+                                              "startSeconds": 1, "endSeconds": 2}, str(uuid.uuid4()))
+    async with httpx.AsyncClient(transport=coordinator.transport) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await coordinator._send_events(client)
+        await coordinator._send_events(client)
+    assert posted[0] == posted[1]
+    assert coordinator.event_queue.empty()
+    await coordinator.close()

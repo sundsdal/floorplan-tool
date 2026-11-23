@@ -21,7 +21,7 @@ resource "google_project_service" "api" {
   for_each = toset([
     "aiplatform.googleapis.com", "apikeys.googleapis.com", "generativelanguage.googleapis.com",
     "artifactregistry.googleapis.com", "iam.googleapis.com",
-    "run.googleapis.com", "secretmanager.googleapis.com", "storage.googleapis.com",
+    "cloudtasks.googleapis.com", "run.googleapis.com", "secretmanager.googleapis.com", "storage.googleapis.com",
   ])
   service            = each.value
   disable_on_destroy = false

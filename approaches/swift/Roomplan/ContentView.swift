@@ -19,13 +19,13 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.scanning {
+                if store.scanning || store.transitioningRooms {
                     ZStack(alignment: .bottom) {
                         CaptureCamera(view: store.captureView).ignoresSafeArea(edges: .bottom)
                         VStack {
                             HStack {
                                 Spacer()
-                                LiveRoomMap(snapshot: store.liveMap, camera: store.cameraPose)
+                                LiveRoomMap(snapshot: store.liveMap, camera: store.cameraPose, destinationRoomID: inspection.request?.roomId)
                                     .frame(width: 180, height: 180)
                                     .padding(6)
                                     .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 16))
@@ -41,7 +41,7 @@ struct ContentView: View {
                                 }
                                 if inspection.link != nil { Text(inspection.status).font(.caption) }
                                 Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
-                                Button("Finish room", action: store.finish)
+                                Button(inspection.link == nil ? "Finish room" : "Avslutt befaring", action: store.finishFromCamera)
                                     .buttonStyle(.borderedProminent).controlSize(.large)
                             }
                             .padding().frame(maxWidth: .infinity)
@@ -52,23 +52,28 @@ struct ContentView: View {
                 } else {
                     List {
                         Section {
-                            if store.processing {
+                            if inspection.finalizeOnly {
+                                Text("Opptaket er avsluttet. Fullfør innsendingen til jobbkortet.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            } else if store.processing {
                                 ProgressView("Preparing room…")
                             } else {
                                 Button { Task { await store.start() } } label: {
-                                    Label("Scan a room", systemImage: "viewfinder")
+                                    Label(inspection.link == nil ? "Scan a room" : "Fortsett befaringen", systemImage: "viewfinder")
                                 }
                                 .disabled(!store.supported || inspection.busy || store.inspectionFinalizationStarted)
                             }
                             if store.hasActiveFloor && !store.processing && inspection.link == nil {
                                 Button("Finish floor", action: store.finishFloor)
                             }
-                            if !store.supported {
+                            if inspection.finalizeOnly {
+                                EmptyView()
+                            } else if !store.supported {
                                 Text("Room scanning requires a supported device with LiDAR. You can use Floorplan AI for video capture instead. Saved scans can still be viewed and shared.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             } else {
                                 Text(inspection.link != nil
-                                     ? "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover."
+                                     ? "Gå gjennom etasjen med kameraet. Du kan snakke med veilederen underveis."
                                      : "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
@@ -84,8 +89,8 @@ struct ContentView: View {
                                         .disabled(store.processing || inspection.busy || store.inspectionFinalizationStarted)
                                 }
                                 if inspection.link != nil {
-                                    Button("Send befaring til jobbkortet") { Task { await store.finishInspection() } }
-                                        .disabled(store.processing || inspection.busy || store.evidenceCaptureInProgress || !store.hasInspectionRooms)
+                                    Button(inspection.finalizeOnly ? "Prøv innsending igjen" : "Send befaring til jobbkortet") { Task { await store.finishInspection() } }
+                                        .disabled(store.processing || inspection.busy || store.evidenceCaptureInProgress || (!store.hasInspectionRooms && !inspection.finalizeOnly))
                                 }
                             }
                         }
