@@ -239,7 +239,9 @@ export async function allEvents(sessionId: string) {
 	if (!state) throw new Unlinked();
 	if (state.pending) {
 		await appendEvent(sessionId, state.pending);
-		return (await current(sessionId)).state?.events;
+		const next = await current(sessionId);
+		if (!next.state) throw new Unlinked();
+		return next.state.events;
 	}
 	return state.events;
 }
