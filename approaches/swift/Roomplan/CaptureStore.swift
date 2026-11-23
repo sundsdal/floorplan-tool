@@ -323,6 +323,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                let records = try? JSONDecoder().decode([InspectionRoomRecord].self, from: data) {
                 inspectionRooms = records.map { ($0.id, $0.saved) }
             } else { inspectionRooms = [] }
+            inspection.restoreSavedRooms(inspectionRooms.map { $0.id.uuidString })
             inspectionRoomID = nil
             guideNamedRooms = [:]
             await start()
@@ -376,7 +377,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                                                    document: document, report: annotation?.markdown)
             }
             try await inspection.publishRooms(submittedRooms)
-            try await inspection.finalize()
+            try await inspection.finalize(rooms: submittedRooms)
             await inspection.disconnect()
             inspection.status = "Befaringen er sendt til jobbkortet."
             inspection.link = nil

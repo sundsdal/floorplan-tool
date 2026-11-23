@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { allEvents, appendEvent, Unlinked } from "@/lib/inspection-events";
-import { inspectionContext, reviewInspection } from "@/lib/inspection-review";
+import {
+	inspectionFinalizeInput,
+	reviewInspection,
+} from "@/lib/inspection-review";
 import { RecordingNotReady, waitForFinalRecording } from "@/lib/livekit-media";
 import {
 	authorizeSession,
@@ -24,7 +27,7 @@ export async function POST(
 	const { sessionId } = await context.params;
 	if (!authorizeSession(sessionId, bearer(request)))
 		return Response.json({ error: "Unauthorized" }, { status: 401 });
-	const input = inspectionContext.safeParse(
+	const input = inspectionFinalizeInput.safeParse(
 		await request.json().catch(() => null),
 	);
 	if (!input.success)
@@ -68,7 +71,7 @@ export async function POST(
 					target: e.data.target,
 				}));
 			const context = events
-				? inspectionContext.parse({
+				? inspectionFinalizeInput.parse({
 						...payload,
 						evidence: saved,
 						rooms: payload.rooms.map((r) => ({
@@ -112,7 +115,7 @@ export async function POST(
 					)
 				) {
 					const target =
-						inspectionContext.shape.evidence.element.shape.target.parse(
+						inspectionFinalizeInput.shape.evidence.element.shape.target.parse(
 							item.data.target,
 						);
 					result.requests.push({

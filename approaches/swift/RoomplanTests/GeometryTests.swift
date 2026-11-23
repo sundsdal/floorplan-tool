@@ -4,6 +4,19 @@ import XCTest
 @testable import Roomplan
 
 final class GeometryTests: XCTestCase {
+  @MainActor func testFinalRoomsIncludeResumedAndNewRoomsWithPreservedOffsets() throws {
+    let stored = ["old": 12.5]
+    var times = try JSONDecoder().decode([String: Double].self, from: JSONEncoder().encode(stored))
+    times["new"] = 42
+    let result = InspectionGuide.finalRooms([("old", "Renamed"), ("new", "New"), ("legacy", "Legacy")], times: times)
+    let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [[String: Any]])
+    XCTAssertEqual(json.map { $0["roomId"] as? String }, ["old", "new", "legacy"])
+    XCTAssertEqual(json[0]["name"] as? String, "Renamed")
+    XCTAssertEqual(json[0]["seconds"] as? Double, 12.5)
+    XCTAssertEqual(json[1]["seconds"] as? Double, 42)
+    XCTAssertNil(json[2]["seconds"])
+  }
+
   func testRevisitUsesNamedRoomAndRejectsAmbiguousMatches() {
     let polygon = [LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3)]
     let named = SpatialRoom(id: "stable-id", name: "Kjøkken", polygon: polygon)

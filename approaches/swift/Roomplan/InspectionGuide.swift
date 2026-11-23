@@ -121,8 +121,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     private var activeRoom: (String, String)?
     private var finalized = false
     @Published var finalSummary = ""
-    private var roomTimes: [(id: String, name: String, seconds: Double)] = []
     private var startTimeByRoom: [String: Double] = [:]
+    private var roomsWithUnknownStart: Set<String> = []
+    private var roomStartInstants: [String: Double] = [:]
     private var latestLocation: SpatialLocation?
     private var lastLocationSent: Int64 = 0
     private var lastSnapshotSent: Int64 = 0
@@ -163,8 +164,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         finalized = false
         startTime = nil
         activeRoom = nil
-        roomTimes = []
-        startTimeByRoom = [:]
+        roomsWithUnknownStart = []
+        roomStartInstants = [:]
+        startTimeByRoom = (try? Data(contentsOf: roomTimesFile(for: pendingLink.visit)))
+            .flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) } ?? [:]
         evidence = []
         request = nil
         finalSummary = ""
@@ -226,6 +229,16 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             .appending(path: "inspection-events-\(visit).json")
     }
 
+    private func roomTimesFile(for visit: String) -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appending(path: "inspection-room-times-\(visit).json")
+    }
+
+    private func persistRoomTimes() {
+        guard let link, let data = try? JSONEncoder().encode(startTimeByRoom) else { return }
+        try? data.write(to: roomTimesFile(for: link.visit), options: [.atomic, .completeFileProtection])
+    }
+
     private func syncEvents() async {
         while !Task.isCancelled, let session {
             let path = "/api/livekit/session/\(session.sessionId)/inspection/events"
@@ -242,9 +255,6 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
                               let roomID = event["roomId"] as? String,
                               let data = event["data"] as? [String: Any] else { continue }
                         if type == "room.named", let name = data["name"] as? String {
-                            if let index = roomTimes.firstIndex(where: { $0.id.lowercased() == roomID.lowercased() }) {
-                                roomTimes[index].name = name
-                            }
                             if activeRoom?.0.lowercased() == roomID.lowercased() { activeRoom = (roomID, name) }
                             onRoomNamed?(roomID, name)
                         } else if (type == "evidence.requested" || type == "evidence.retry"), let requestID = data["requestId"] as? String,
@@ -331,6 +341,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
                     let data = try await cloudRequest("/api/livekit/session/\(session.sessionId)/recording", method: "POST", body: Data("{}".utf8))
                     if let started = try JSONDecoder().decode(Recording.self, from: data).startedAt {
                         startTime = started
+                        for (id, instant) in roomStartInstants where startTimeByRoom[id] == nil {
+                            startTimeByRoom[id] = max(0, instant - started / 1000)
+                        }
+                        persistRoomTimes()
                         enqueueRecording(started)
                         if let activeRoom { announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
                         return
@@ -342,16 +356,27 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
+    func restoreSavedRooms(_ ids: [String]) {
+        roomsWithUnknownStart = Set(ids.map { $0.lowercased() }.filter { startTimeByRoom[$0] == nil })
+    }
+
     func announceRoom(id: String, name: String, phase: String) {
         if phase == "start" { activeRoom = (id, name) }
         let seconds = startTime.map { max(0, Date().timeIntervalSince1970 - $0 / 1000) } ?? 0
-        if phase == "start", startTimeByRoom[id] == nil { startTimeByRoom[id] = seconds }
+        let key = id.lowercased()
+        if phase == "start", startTimeByRoom[key] == nil, !roomsWithUnknownStart.contains(key) {
+            if roomStartInstants[key] == nil { roomStartInstants[key] = Date().timeIntervalSince1970 }
+            if let startTime, let instant = roomStartInstants[key] {
+                startTimeByRoom[key] = max(0, instant - startTime / 1000)
+                persistRoomTimes()
+            }
+        }
         if phase == "finish" {
-            roomTimes.removeAll { $0.id == id }
-            roomTimes.append((id, name, startTimeByRoom[id] ?? seconds))
+            if startTimeByRoom[key] == nil, startTime != nil, !roomsWithUnknownStart.contains(key) { startTimeByRoom[key] = seconds }
+            persistRoomTimes()
             if activeRoom?.0 == id { activeRoom = nil }
         }
-        let announcedSeconds = phase == "start" ? (startTimeByRoom[id] ?? seconds) : seconds
+        let announcedSeconds = phase == "start" ? (startTimeByRoom[key] ?? seconds) : seconds
         if let data = try? JSONSerialization.data(withJSONObject: ["roomId": id, "name": name, "seconds": announcedSeconds, "phase": phase]) {
             enqueuePacket(key: "room:\(id):\(phase)", topic: "floorplan.inspection.room", data: data)
         }
@@ -539,20 +564,43 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         throw InspectionSynchronizationError.waitingForVideo
     }
 
-    func finalize() async throws {
+    struct FinalRoom: Encodable {
+        let roomId: String
+        let name: String
+        let seconds: Double?
+    }
+
+    static func finalRooms(_ rooms: [(id: String, name: String)], times: [String: Double]) -> [FinalRoom] {
+        rooms.map { room in
+            FinalRoom(roomId: room.id, name: room.name,
+                      seconds: times[room.id.lowercased()])
+        }
+    }
+
+    func finalize(rooms: [ScannedRoom]) async throws {
         guard !finalized, let session, let link else { return }
         try await flushEvents()
-        let body = try JSONSerialization.data(withJSONObject: [
-            "work": link.work,
-            "rooms": roomTimes.map { ["roomId": $0.id, "name": $0.name, "seconds": $0.seconds] },
-            "evidence": evidence.map { ["requestId": $0.requestId, "roomId": $0.roomId, "target": $0.target] }
-        ])
+        struct FinalBody: Encodable {
+            let work: String
+            let rooms: [FinalRoom]
+            let evidence: [FinalEvidence]
+        }
+        struct FinalEvidence: Encodable {
+            let requestId: String
+            let roomId: String
+            let target: String
+        }
+        let body = try JSONEncoder().encode(FinalBody(
+            work: link.work,
+            rooms: Self.finalRooms(rooms.map { ($0.roomId, $0.name) }, times: startTimeByRoom),
+            evidence: evidence.map { FinalEvidence(requestId: $0.requestId, roomId: $0.roomId, target: $0.target) }
+        ))
         let response = try await finalizeRequest(path: "/api/livekit/session/\(session.sessionId)/inspection/finalize", body: body)
         struct FinalRequest: Decodable { let roomId: String; let target: String }
         struct FinalResult: Decodable { let summary: String; let requests: [FinalRequest] }
         let result = try JSONDecoder().decode(FinalResult.self, from: response)
         let missing = result.requests.map { item in
-            let name = roomTimes.first(where: { $0.id == item.roomId })?.name ?? "Rom"
+            let name = rooms.first(where: { $0.roomId.lowercased() == item.roomId.lowercased() })?.name ?? "Rom"
             return "\(name): \(item.target)"
         }
         let summary = ([result.summary] + missing).joined(separator: "\n")
