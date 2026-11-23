@@ -64,6 +64,7 @@ async def test_finished_room_reviews_video_once_and_publishes_result():
         transport=httpx.MockTransport(handler), lag_seconds=0,
     )
     coordinator.room_packet(json.dumps({"roomId": room, "name": "Bad", "seconds": 2, "phase": "start"}).encode(), "operator")
+    coordinator.room_packet(json.dumps({"roomId": room, "name": "Bad", "seconds": 8, "phase": "start"}).encode(), "operator")
     coordinator.room_packet(json.dumps({"roomId": room, "name": "Bad", "seconds": 10, "phase": "finish"}).encode(), "operator")
     assert coordinator.pending_review
     coordinator.recording_started(time.time() - 20)
@@ -75,6 +76,21 @@ async def test_finished_room_reviews_video_once_and_publishes_result():
     assert published[0]["target"] == "ventilation"
     assert spoken[0]["roomName"] == "Bad"
     assert spoken[0]["prompt"] == TARGETS["ventilation"]
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_first_start_replaces_finish_fallback_only_once():
+    room = str(uuid.uuid4())
+    coordinator = InspectionCoordinator(
+        base_url="http://test", token="token", session_id="session", work="male",
+        participant_identity="operator", publish=lambda value: None, speak=lambda value: None,
+    )
+    for phase, seconds, name in [("finish", 10, "Old"), ("start", 2, "New"),
+                                 ("start", 12, "Renamed"), ("finish", 15, "Final")]:
+        coordinator.room_packet(json.dumps({"roomId": room, "name": name, "seconds": seconds,
+                                            "phase": phase}).encode(), "operator")
+    assert coordinator.rooms[room] == {"roomId": room, "name": "Final", "seconds": 2}
     await coordinator.close()
 
 

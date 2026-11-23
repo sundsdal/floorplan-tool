@@ -59,6 +59,7 @@ class InspectionCoordinator:
         self.lag_seconds = lag_seconds
         self.started_at = None
         self.rooms = {}
+        self.room_starts = set()
         self.current_room = None
         self.requests = {}
         self.evidence = []
@@ -92,9 +93,11 @@ class InspectionCoordinator:
             self.rooms[ident] = {"roomId": ident, "name": name.strip(), "seconds": seconds}
         else:
             existing["name"] = name.strip()
-            # A room belongs to the instant it started, not its finish event.
-            if phase == "start":
+            # A finish can arrive first, but repeated starts must not move the offset.
+            if phase == "start" and ident not in self.room_starts:
                 existing["seconds"] = seconds
+        if phase == "start":
+            self.room_starts.add(ident)
         if self.location is None:
             self.current_room = ident
         if phase == "finish":

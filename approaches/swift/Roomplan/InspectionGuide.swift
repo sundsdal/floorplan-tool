@@ -252,12 +252,14 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     func announceRoom(id: String, name: String, phase: String) async {
         if phase == "start" { activeRoom = (id, name) }
         let seconds = startTime.map { max(0, Date().timeIntervalSince1970 - $0 / 1000) } ?? 0
-        if phase == "start" { startTimeByRoom[id] = seconds }
+        if phase == "start", startTimeByRoom[id] == nil { startTimeByRoom[id] = seconds }
         if phase == "finish" {
             roomTimes.removeAll { $0.id == id }
             roomTimes.append((id, name, startTimeByRoom[id] ?? seconds))
+            if activeRoom?.0 == id { activeRoom = nil }
         }
-        await send(["roomId": id, "name": name, "seconds": seconds, "phase": phase], topic: "floorplan.inspection.room")
+        let announcedSeconds = phase == "start" ? (startTimeByRoom[id] ?? seconds) : seconds
+        await send(["roomId": id, "name": name, "seconds": announcedSeconds, "phase": phase], topic: "floorplan.inspection.room")
     }
 
     private func send(_ value: [String: Any], topic: String) async {
@@ -334,24 +336,24 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
-    nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if let startTime { await send(["startedAt": startTime], topic: "floorplan.recording") }
-            if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
-            if let latestLocation {
-                pendingLocation = latestLocation
-                sendPendingLocation()
-            }
-        }
-    }
-
-    nonisolated func roomDidReconnect(_ room: Room) {
-        Task { @MainActor [weak self] in
-            guard let self, let latestLocation else { return }
+    private func replayState(for callbackRoom: Room) async {
+        guard room === callbackRoom else { return }
+        if let startTime { await send(["startedAt": startTime], topic: "floorplan.recording") }
+        guard room === callbackRoom else { return }
+        if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
+        guard room === callbackRoom else { return }
+        if let latestLocation {
             pendingLocation = latestLocation
             sendPendingLocation()
         }
+    }
+
+    nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
+        Task { @MainActor [weak self] in await self?.replayState(for: room) }
+    }
+
+    nonisolated func roomDidReconnect(_ room: Room) {
+        Task { @MainActor [weak self] in await self?.replayState(for: room) }
     }
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
