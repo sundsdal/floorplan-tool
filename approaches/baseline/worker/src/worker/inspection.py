@@ -73,6 +73,9 @@ class InspectionCoordinator:
         self.named_rooms = set()
         self.registered_rooms = set()
         self.events_supported = None
+        self.event_wakeup = asyncio.Event()
+        self.recovery_marks = {}
+        self.event_inflight = None
 
     def start_events(self):
         if self.event_task is None:
@@ -84,39 +87,77 @@ class InspectionCoordinator:
         if ident:
             event["roomId"] = ident
         self.event_queue.put_nowait(event)
+        self.event_wakeup.set()
+
+    async def _sync_events(self, client):
+        # Rebuild all state before treating acknowledgements as live; pages are capped at 100.
+        while True:
+            response = await client.get(self.base_url + "/events", headers=self.headers,
+                                        params={"after": self.event_cursor})
+            if response.status_code == 404:
+                self.events_supported = False
+                return
+            response.raise_for_status()
+            self.events_supported = True
+            page = response.json()
+            events, cursor = page.get("events"), page.get("cursor")
+            if (not isinstance(events, list) or not isinstance(cursor, int)
+                    or cursor != self.event_cursor + len(events)):
+                raise ValueError("Invalid event page")
+            for event in events:
+                self._apply_event(event)
+            self.event_cursor = cursor
+            if len(events) < 100:
+                if not self.events_loaded:
+                    queued_ids = {event["id"] for event in self.event_queue._queue}
+                    for event in self.recovery_marks.values():
+                        if event["id"] not in queued_ids:
+                            self.event_queue.put_nowait(event)
+                    self.recovery_marks.clear()
+                self.events_loaded = True
+                return
+
+    async def _send_events(self, client):
+        # Marked intervals must not wait behind an indefinitely failing transcript.
+        priority = {"evidence.requested": 0, "evidence.marked": 1, "room.named": 2}
+        self.event_queue._queue = type(self.event_queue._queue)(sorted(
+            self.event_queue._queue, key=lambda event: priority.get(event["type"], 3)))
+        count = self.event_queue.qsize()
+        for _ in range(count):
+            event = self.event_queue.get_nowait()
+            if (event["type"] == "evidence.marked" and any(
+                    e["requestId"] == event["data"]["requestId"] for e in self.evidence)):
+                continue
+            self.event_inflight = event
+            try:
+                response = await client.post(self.base_url + "/events", headers=self.headers, json=event)
+                if response.status_code == 409:
+                    self.event_queue.put_nowait(event)
+                    continue
+                if response.status_code != 404:
+                    response.raise_for_status()
+            except (httpx.HTTPError, asyncio.CancelledError):
+                self.event_queue.put_nowait(event)
+                raise
+            finally:
+                self.event_inflight = None
 
     async def _event_loop(self):
-        # Retry with the same UUID so a response lost after commit cannot duplicate an event.
+        # Every retry keeps its UUID, including after a lost POST response.
         async with httpx.AsyncClient(transport=self.transport, timeout=15) as client:
             while not self.closed:
                 try:
-                    while not self.event_queue.empty():
-                        event = self.event_queue._queue[0]
-                        response = await client.post(self.base_url + "/events", headers=self.headers, json=event)
-                        if response.status_code == 409:
-                            break  # Poll for the room registration, then retry the same event.
-                        if response.status_code != 404:
-                            response.raise_for_status()
-                        self.event_queue.get_nowait()
-                    response = await client.get(self.base_url + "/events", headers=self.headers,
-                                                params={"after": self.event_cursor})
-                    if response.status_code == 404:
-                        self.events_supported = False
-                    else:
-                        self.events_supported = True
-                        response.raise_for_status()
-                        page = response.json()
-                        if not isinstance(page.get("events"), list) or not isinstance(page.get("cursor"), int):
-                            raise ValueError("Invalid event page")
-                        for event in page["events"]:
-                            self._apply_event(event)
-                        self.event_cursor = page["cursor"]
-                        self.events_loaded = True
+                    await self._sync_events(client)
+                    await self._send_events(client)
                 except asyncio.CancelledError:
                     raise
                 except (httpx.HTTPError, ValueError, TypeError, KeyError):
                     logger.warning("Inspection event sync failed; retrying")
-                await asyncio.sleep(2)
+                self.event_wakeup.clear()
+                try:
+                    await asyncio.wait_for(self.event_wakeup.wait(), timeout=2)
+                except TimeoutError:
+                    pass
 
     def _apply_event(self, event):
         if not isinstance(event, dict) or not isinstance(event.get("data"), dict):
@@ -139,7 +180,13 @@ class InspectionCoordinator:
                 self.requests.setdefault(request_id, {"requestId": request_id, "roomId": ident,
                     "roomName": self.rooms.get(ident, {}).get("name", ""), "target": target,
                     "prompt": TARGETS[target]})
+        elif kind == "evidence.marked" and not self.events_loaded:
+            if isinstance(event.get("id"), str) and ident and room_id(data.get("requestId")):
+                self.recovery_marks[event["id"]] = event
         elif kind in ("evidence.saved", "evidence.retry"):
+            for key, mark in list(self.recovery_marks.items()):
+                if mark["data"].get("requestId") == data.get("requestId"):
+                    del self.recovery_marks[key]
             request_id = data.get("requestId")
             request = self.requests.get(request_id)
             if request and kind == "evidence.saved":
@@ -154,16 +201,15 @@ class InspectionCoordinator:
                 if self.events_loaded and self.answer:
                     self.answer("Dokumentasjonen kunne ikke lagres. Prøv å filme på nytt.")
 
-    def set_room_name(self, ident, name):
+    def set_room_name(self, ident, name, source="user"):
         ident = room_id(ident)
-        if (self.event_task and self.events_supported is not False and ident not in self.registered_rooms):
-            return False
-        if ident not in self.rooms or not isinstance(name, str) or not name.strip() or len(name) > 80:
+        if (source not in ("live", "user") or ident not in self.rooms
+                or not isinstance(name, str) or not name.strip() or len(name) > 80):
             return False
         name = name.strip()
         self.rooms[ident]["name"] = name
         self.named_rooms.add(ident)
-        self.emit_event("room.named", {"name": name, "source": "user"}, ident)
+        self.emit_event("room.named", {"name": name, "source": source}, ident)
         return True
 
     def mark_evidence(self, request_id, start_seconds, end_seconds):
@@ -458,6 +504,14 @@ class InspectionCoordinator:
                 logger.warning("Inspection review failed")
 
     async def close(self):
+        if self.event_task and (not self.event_queue.empty() or self.event_inflight):
+            self.event_wakeup.set()
+            try:
+                async with asyncio.timeout(3):
+                    while not self.event_queue.empty() or self.event_inflight:
+                        await asyncio.sleep(0.05)
+            except TimeoutError:
+                logger.warning("Inspection events remain unsent at shutdown")
         self.closed = True
         tasks = list(self.context_tasks)
         if self.review_task:

@@ -67,7 +67,7 @@ request_inspection_evidence for bildeforespørsler og bare rom-ID som systemet
 har gitt deg. Be brukeren filme eller ta bilde fra et trygt tilgjengelig sted.
 Ikke be noen åpne elektriske installasjoner, bryte opp materialer eller gå inn i sjakter.
 Ikke identifiser asbest eller materialinnhold ut fra bilder. Si fra ved usikkerhet.
-Når personen navngir et kjent rom, bruk set_room_name. Ved en rettelse, bruk rom-ID-en
+Når personen navngir et kjent rom, bruk set_room_name med source=user. Hvis du selv utleder et romnavn fra video, bruk source=live. Ved en rettelse, bruk rom-ID-en
 til rommet det forrige navnet gjaldt, selv om personen har beveget seg videre. Når ønsket dokumentasjon er filmet,
 bruk mark_evidence med opptakets tidsintervall og forespørselens ID. Ikke påstå at dokumentasjonen er lagret før bekreftelse.
 Bruk get_current_room for å svare på spørsmål om rommet, og hvis posisjonen er usikker, si det.
@@ -95,9 +95,9 @@ før brukeren har bekreftet bildet.""")
 
 
     @function_tool()
-    async def set_room_name(self, room_id: str, name: str) -> str:
-        """Name a known room when the operator identifies it, using the system room UUID."""
-        return "Romnavnet er oppdatert." if self.inspection.set_room_name(room_id, name) else "Rommet eller navnet er ugyldig."
+    async def set_room_name(self, room_id: str, name: str, source: str) -> str:
+        """Name a known room with its system UUID. Set source to user for a spoken name or correction, live for your own visual inference."""
+        return "Romnavnet er oppdatert." if self.inspection.set_room_name(room_id, name, source) else "Rommet eller navnet er ugyldig."
 
     @function_tool()
     async def mark_evidence(self, request_id: str, start_seconds: float, end_seconds: float) -> str:
