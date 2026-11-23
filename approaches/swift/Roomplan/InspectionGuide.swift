@@ -109,6 +109,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     private var session: GuideSession?
     private var keepaliveTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
+    private var evidenceTask: Task<Void, Never>?
+    private var evidenceTaskID: UUID?
+    private var pendingEvidence: [String: Data] = [:]
     private var startTime: Double?
     private var activeRoom: (String, String)?
     private var finalized = false
@@ -342,6 +345,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         guard room === callbackRoom else { return }
         if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
         guard room === callbackRoom else { return }
+        sendPendingEvidence()
         if let latestLocation {
             pendingLocation = latestLocation
             sendPendingLocation()
@@ -361,11 +365,16 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
               let request = try? JSONDecoder().decode(InspectionRequest.self, from: data),
               UUID(uuidString: request.roomId) != nil,
               !request.requestId.isEmpty, !request.target.isEmpty, !request.prompt.isEmpty else { return }
-        Task { @MainActor [weak self] in self?.request = request }
+        Task { @MainActor [weak self] in
+            guard let self, self.room === room, self.connected,
+                  !self.evidence.contains(where: { $0.requestId == request.requestId }) else { return }
+            self.request = request
+        }
     }
 
     func takeEvidence(_ buffer: CVPixelBuffer?) async {
-        guard let buffer, let request else { return }
+        guard let buffer, let request, room != nil,
+              !evidence.contains(where: { $0.requestId == request.requestId }) else { return }
         let image = CIImage(cvPixelBuffer: buffer).oriented(.right)
         let scale = min(1, 1200 / max(image.extent.width, image.extent.height))
         let resized = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -376,7 +385,37 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
         evidence.append(InspectionEvidence(roomId: request.roomId.lowercased(), target: request.target, jpeg: jpeg.base64EncodedString(), requestId: request.requestId))
         self.request = nil
-        await send(["requestId": request.requestId, "roomId": request.roomId.lowercased()], topic: "floorplan.inspection.evidence")
+        // Keep the notification until LiveKit accepts it, independent of the local photo.
+        if let data = try? JSONSerialization.data(withJSONObject: ["requestId": request.requestId, "roomId": request.roomId.lowercased()]) {
+            pendingEvidence[request.requestId] = data
+            sendPendingEvidence()
+        }
+    }
+
+    private func sendPendingEvidence() {
+        guard evidenceTask == nil, !pendingEvidence.isEmpty, let room, connected else { return }
+        let taskID = UUID()
+        evidenceTaskID = taskID
+        evidenceTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if evidenceTaskID == taskID {
+                    evidenceTask = nil
+                    evidenceTaskID = nil
+                }
+            }
+            while !Task.isCancelled, self.room === room, connected,
+                  let (requestID, data) = pendingEvidence.first {
+                do {
+                    try await room.localParticipant.publish(data: data, options: DataPublishOptions(topic: "floorplan.inspection.evidence", reliable: true))
+                    guard !Task.isCancelled, self.room === room, evidenceTaskID == taskID else { return }
+                    pendingEvidence.removeValue(forKey: requestID)
+                } catch {
+                    guard !Task.isCancelled, self.room === room, evidenceTaskID == taskID else { return }
+                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                }
+            }
+        }
     }
 
     func finalize() async throws {
@@ -427,10 +466,16 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     func disconnect() async {
         recordingTask?.cancel()
         keepaliveTask?.cancel()
-        if let room { await room.disconnect() }
+        evidenceTask?.cancel()
+        evidenceTask = nil
+        evidenceTaskID = nil
+        pendingEvidence.removeAll()
+        let disconnectedRoom = room
         room = nil
-        track = nil
         connected = false
+        request = nil
+        if let disconnectedRoom { await disconnectedRoom.disconnect() }
+        track = nil
         publishing = false
         published = false
         latestLocation = nil
