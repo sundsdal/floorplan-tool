@@ -7,6 +7,7 @@ import logging
 import math
 import time
 import uuid
+from collections import deque
 from collections.abc import Awaitable, Callable
 
 import httpx
@@ -48,6 +49,7 @@ class InspectionCoordinator:
         self.transport = transport
         self.update_context = update_context
         self.answer = answer
+        self.location_history = deque(maxlen=1800)
         self.location = None
         self.location_received = 0.0
         self.location_timestamp = 0.0
@@ -120,9 +122,10 @@ class InspectionCoordinator:
     async def _send_events(self, client):
         # Marked intervals must not wait behind an indefinitely failing transcript.
         priority = {"evidence.requested": 0, "evidence.marked": 1, "room.named": 2}
-        self.event_queue._queue = type(self.event_queue._queue)(sorted(
-            self.event_queue._queue, key=lambda event: priority.get(event["type"], 3)))
         count = self.event_queue.qsize()
+        batch = [self.event_queue.get_nowait() for _ in range(count)]
+        for queued in sorted(batch, key=lambda item: priority.get(item["type"], 3)):
+            self.event_queue.put_nowait(queued)
         for _ in range(count):
             event = self.event_queue.get_nowait()
             if (event["type"] == "evidence.marked" and any(
@@ -305,12 +308,19 @@ class InspectionCoordinator:
                     location[field] = point
         except (ValueError, KeyError, TypeError, UnicodeDecodeError):
             return
+        self.location_history.append((captured_at / 1000, location.get("roomId")))
         self.location = location
         self.location_timestamp = captured_at
         self.location_received = time.time()
         self.current_room = location.get("roomId")
         if self.update_context and self._room_changed(location):
             self._spawn_context(self._update_location_context(location))
+
+    def room_at(self, timestamp):
+        for captured_at, ident in reversed(self.location_history):
+            if captured_at <= timestamp:
+                return ident if timestamp - captured_at < 20 else None
+        return None
 
     def _room_changed(self, location):
         state = (location.get("tracking"), location.get("roomId"))

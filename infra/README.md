@@ -67,7 +67,7 @@ deployed image digest and contains no credentials.
 
 ### Enable the LiveKit guide and mobile capture
 
-The API alone scales to zero. To use guided capture, supply a LiveKit project
+The API and guide scale to zero when idle. To use guided capture, supply a LiveKit project
 with agent dispatch and participant Egress. Add secret versions using
 `gcloud secrets versions add … --data-file=… --project=kinhelse-shared`:
 
@@ -77,8 +77,9 @@ with agent dispatch and participant Egress. Add secret versions using
 | `floorplan-session-secret` | Random signing secret of at least 32 characters |
 | `floorplan-egress-credentials` | Raw service account JSON for the Egress writer |
 
-Publish the worker with `bash infra/publish-image.sh worker`. In
-`infra/terraform/livekit.auto.tfvars` set:
+The deployed LiveKit project, worker digest, and recording-writer address are
+recorded in `infra/terraform/livekit.auto.tfvars`. When releasing a new worker,
+publish it with `bash infra/publish-image.sh worker` and update the digest:
 
 ```hcl
 livekit = {
@@ -90,8 +91,23 @@ livekit = {
 
 Plan and apply the runtime root again. Terraform creates a private recording
 bucket with a seven-day object lifecycle and grants the writer scoped access.
-The guide runs as a sidecar with always-allocated CPU on one minimum instance
-and calls the API over localhost. The API and worker share the dispatch name.
+The guide runs as a sidecar and calls the API over localhost. Both containers use
+request-based CPU, with zero minimum instances and one maximum instance. The
+mobile app holds a session-authenticated, four-minute HTTP request open and
+renews it while capture is active, keeping CPU available to the guide. Closing
+the guide cancels the request; network interruptions are retried. Cloud Run
+enables this through `LIVEKIT_KEEPALIVE=true`; local deployments leave it unset
+unless they also need request-based CPU. The API and worker share the dispatch name.
 For a physical phone, use an authenticated gateway or a trusted tunnel to the
 local proxy and point `EXPO_PUBLIC_API_URL` there; the app's session tokens
 are distinct from Cloud Run IAM credentials.
+
+The Google Sign-In iOS build can also call this service directly. Keep the
+deployed `mobile_oauth` settings in an ignored `mobile-oauth.auto.tfvars` file
+when applying Terraform. Its `client_id` is the Web OAuth client ID and its
+`email` identifies the Google account with Cloud Run invocation access.
+The iOS build settings are in the [mobile README](../approaches/baseline/mobile/README.md).
+
+## Guided inspections
+
+Enable the Cloud Tasks API with the bootstrap configuration. Set the optional Terraform `inspection` object with `job_origin` matching the iOS build’s approved Risikovurdering HTTPS origin and `service_origin` matching the canonical Cloud Run service URL. Both use origins without a trailing slash. Deploy the job service with its incremental PATCH endpoint before enabling linked mobile builds. Frame extraction uses authenticated Cloud Tasks requests, including while the phone is disconnected. The private capture bucket holds the session timeline and recording for its existing seven-day lifecycle. The visit stores accepted JPEGs with their source time.

@@ -17,3 +17,12 @@ def test_cloud_model_uses_project_region_and_adc(monkeypatch):
     with patch("worker.agent.google.realtime.RealtimeModel") as model:
         create_realtime_model()
         assert model.call_args.kwargs["location"] == "eu"
+
+
+def test_inspection_enables_transcription_for_both_speakers(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test")
+    with patch("worker.agent.google.realtime.RealtimeModel") as model:
+        create_realtime_model(inspection=True)
+        options = model.call_args.kwargs
+        assert options["input_audio_transcription"] is not None
+        assert options["output_audio_transcription"] is not None

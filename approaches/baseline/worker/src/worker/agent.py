@@ -5,6 +5,7 @@ import json
 import os
 import time
 
+from google.genai import types as genai_types
 from livekit import rtc
 from livekit.agents import (
     Agent, AgentServer, AgentSession, JobContext, cli, function_tool, llm, room_io,
@@ -127,10 +128,12 @@ før brukeren har bekreftet bildet.""")
 
 
 
-def create_realtime_model():
+def create_realtime_model(*, inspection=False):
     """Use Google Cloud credentials and the Enterprise Agent Platform Live API."""
     return google.realtime.RealtimeModel(
         model="gemini-3.8-live",
+        **({"input_audio_transcription": genai_types.AudioTranscriptionConfig(),
+            "output_audio_transcription": genai_types.AudioTranscriptionConfig()} if inspection else {}),
         vertexai=True,
         project=os.environ["GOOGLE_CLOUD_PROJECT"],
         location=os.environ.get("GOOGLE_CLOUD_LOCATION") or "us-central1",
@@ -156,7 +159,7 @@ async def entrypoint(ctx: JobContext):
     if ctx.job.room.name != f"capture-{session_id}" or identity != f"capture-user-{session_id}":
         raise ValueError("Job metadata does not match the room")
     base_url = os.environ["FLOORPLAN_SERVER_URL"]
-    session = AgentSession(llm=create_realtime_model())
+    session = AgentSession(llm=create_realtime_model(inspection=mode == "inspection"))
 
     async def publish(value: dict):
         await ctx.room.local_participant.publish_data(
@@ -247,7 +250,7 @@ async def entrypoint(ctx: JobContext):
             created = getattr(item, "created_at", time.time())
             if inspection.started_at is not None and created >= inspection.started_at:
                 data["seconds"] = round(created - inspection.started_at, 3)
-            inspection.emit_event("transcript", data, inspection.current_room, int(created * 1000))
+            inspection.emit_event("transcript", data, inspection.room_at(created), int(created * 1000))
 
     @ctx.room.on("data_received")
     def on_data(packet: rtc.DataPacket):
@@ -261,7 +264,6 @@ async def entrypoint(ctx: JobContext):
                 else:
                     draft.start(review.started_at)
         elif mode == "inspection" and packet.topic == "floorplan.inspection.room":
-            before = inspection.current_room
             inspection.room_packet(packet.data, packet.participant.identity if packet.participant else None)
         elif mode == "inspection" and packet.topic == "floorplan.inspection.location":
             inspection.location_packet(packet.data, packet.participant.identity if packet.participant else None)

@@ -178,6 +178,13 @@ async function usingMedia<T>(
 		await rm(dir, { recursive: true, force: true });
 	}
 }
+export function withRecordingRange<T>(
+	sessionId: string,
+	range: Range,
+	callback: (file: string) => Promise<T>,
+) {
+	return usingMedia(sessionId, [range], ([file]) => callback(file));
+}
 /** Materialize the full committed video up to the requested inspection checkpoint. */
 export function withInspectionVideo<T>(
 	sessionId: string,

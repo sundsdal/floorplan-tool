@@ -122,9 +122,12 @@ export type CaptureMode =
 	| { mode: "inspection"; work: "male" | "slipe" }
 	| { mode?: "floorplan" };
 
-export async function createSession(options: CaptureMode = {}) {
+export async function createSession(
+	options: CaptureMode = {},
+	linkedId?: string,
+) {
 	const { c, room, dispatch } = clients();
-	const sessionId = randomUUID();
+	const sessionId = linkedId ?? randomUUID();
 	const roomId = roomName(sessionId);
 	const identity = participantIdentity(sessionId);
 	await room.createRoom({
@@ -133,14 +136,20 @@ export async function createSession(options: CaptureMode = {}) {
 		maxParticipants: 3,
 	});
 	try {
-		await dispatch.createDispatch(roomId, c.agent, {
-			metadata: JSON.stringify({
-				sessionId,
-				participantIdentity: identity,
-				reviewToken: capability(sessionId, "review"),
-				...(options.mode === "inspection" ? options : {}),
-			}),
-		});
+		if (
+			!linkedId ||
+			!(await dispatch.listDispatch(roomId)).some(
+				(item) => item.agentName === c.agent,
+			)
+		)
+			await dispatch.createDispatch(roomId, c.agent, {
+				metadata: JSON.stringify({
+					sessionId,
+					participantIdentity: identity,
+					reviewToken: capability(sessionId, "review"),
+					...(options.mode === "inspection" ? options : {}),
+				}),
+			});
 		const access = new AccessToken(c.key, c.secret, {
 			identity,
 			ttl: ttlSeconds,
@@ -162,7 +171,7 @@ export async function createSession(options: CaptureMode = {}) {
 			...(process.env.LIVEKIT_KEEPALIVE === "true" ? { keepalive: true } : {}),
 		};
 	} catch (error) {
-		await room.deleteRoom(roomId).catch(() => {});
+		if (!linkedId) await room.deleteRoom(roomId).catch(() => {});
 		throw error;
 	}
 }

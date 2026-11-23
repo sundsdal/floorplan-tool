@@ -56,7 +56,7 @@ struct ContentView: View {
                                 ProgressView("Preparing room…")
                             } else {
                                 Button { Task { await store.start() } } label: {
-                                    Label("Scan a room", systemImage: "viewfinder")
+                                    Label(inspection.link == nil ? "Scan a room" : "Fortsett befaringen", systemImage: "viewfinder")
                                 }
                                 .disabled(!store.supported || inspection.busy || store.inspectionFinalizationStarted)
                             }
@@ -68,7 +68,7 @@ struct ContentView: View {
                                     .font(.footnote).foregroundStyle(.secondary)
                             } else {
                                 Text(inspection.link != nil
-                                     ? "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover."
+                                     ? "Gå gjennom etasjen med kameraet. Du kan snakke med veilederen underveis."
                                      : "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
