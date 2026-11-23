@@ -12,7 +12,7 @@ struct SavedRoom: Identifiable, Codable {
 }
 
 @MainActor
-final class CaptureStore: NSObject, ObservableObject, @preconcurrency RoomCaptureSessionDelegate {
+final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate {
     @Published var rooms: [SavedRoom] = []
     @Published var message: String?
     @Published var scanning = false
@@ -69,32 +69,41 @@ final class CaptureStore: NSObject, ObservableObject, @preconcurrency RoomCaptur
         captureView.captureSession.stop(pauseARSession: false)
     }
 
-    func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
+    nonisolated func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
+        let sessionIdentity = ObjectIdentifier(session)
+        let text: String
         switch instruction {
-        case .moveCloseToWall: self.instruction = "Move closer to the wall."
-        case .moveAwayFromWall: self.instruction = "Move away from the wall."
-        case .slowDown: self.instruction = "Move more slowly."
-        case .turnOnLight: self.instruction = "Turn on more light."
-        case .lowTexture: self.instruction = "Point at an area with more detail."
-        default: self.instruction = "Move slowly around the room, keeping walls and openings in view."
+        case .moveCloseToWall: text = "Move closer to the wall."
+        case .moveAwayFromWall: text = "Move away from the wall."
+        case .slowDown: text = "Move more slowly."
+        case .turnOnLight: text = "Turn on more light."
+        case .lowTexture: text = "Point at an area with more detail."
+        default: text = "Move slowly around the room, keeping walls and openings in view."
+        }
+        Task { @MainActor [weak self] in
+            guard let self, ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
+            self.instruction = text
         }
     }
 
-    func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: (any Error)?) {
-        scanning = false
-        trackingTask?.cancel()
-        guard error == nil else {
-            processing = false
-            message = "Scan ended: \(error!.localizedDescription). Previously saved rooms are still available."
-            return
-        }
-        processing = true
-        Task {
+    nonisolated func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: (any Error)?) {
+        let sessionIdentity = ObjectIdentifier(session)
+        let errorDescription = error?.localizedDescription
+        Task { @MainActor [weak self] in
+            guard let self, ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
+            self.scanning = false
+            self.trackingTask?.cancel()
+            if let errorDescription {
+                self.processing = false
+                self.message = "Scan ended: \(errorDescription). Previously saved rooms are still available."
+                return
+            }
+            self.processing = true
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
-                try save(room)
-            } catch { message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
-            processing = false
+                try self.save(room)
+            } catch { self.message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
+            self.processing = false
         }
     }
 
