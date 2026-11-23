@@ -9,11 +9,14 @@
 /* Begin PBXBuildFile section */
 		4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */; };
 		488ED675BD25C401C5F7008B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */; };
+		5DF3C9345A3B2FAD918C4F19 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 0DD69F458422E3FF370BC61C /* GoogleSignIn */; };
+		5E1FFAD73EC44270171A4A1D /* LiveRoomMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6050229EDB84731DB788BF3A /* LiveRoomMap.swift */; };
 		8085607931A95535BBBBE2A6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D3602976A827ED45303FBAA /* Assets.xcassets */; };
 		964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */; };
 		9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24CB24A93EE055427841733 /* RoomplanApp.swift */; };
 		A164A91177309BAFF53DA7F2 /* GeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */; };
 		D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */; };
+		E3699362E41B4E791EE554A5 /* RoomAnnotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */; };
 		E8CC2ED744FC3A970CF3AC94 /* rotated-l.json in Resources */ = {isa = PBXBuildFile; fileRef = 20A3987AD3EE2275D6B92CEA /* rotated-l.json */; };
 		ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */; };
 /* End PBXBuildFile section */
@@ -32,15 +35,29 @@
 		0D3602976A827ED45303FBAA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		20A3987AD3EE2275D6B92CEA /* rotated-l.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "rotated-l.json"; sourceTree = "<group>"; };
 		518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureStore.swift; sourceTree = "<group>"; };
+		6050229EDB84731DB788BF3A /* LiveRoomMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveRoomMap.swift; sourceTree = "<group>"; };
 		74136102206A16C8DE923420 /* RoomplanTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RoomplanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9939679621458CF134656D46 /* Roomplan.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Roomplan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloorplanDocument.swift; sourceTree = "<group>"; };
 		B24CB24A93EE055427841733 /* RoomplanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomplanApp.swift; sourceTree = "<group>"; };
+		C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomAnnotation.swift; sourceTree = "<group>"; };
+		C98C13F5DA987B8AA7AF3255 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGRenderer.swift; sourceTree = "<group>"; };
 		E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanConverter.swift; sourceTree = "<group>"; };
 		EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeometryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		BD3A9A0C9CFE3D693BF5B7A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5DF3C9345A3B2FAD918C4F19 /* GoogleSignIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		05453098BCEE6AAE95396045 /* Geometry */ = {
@@ -86,6 +103,9 @@
 				0D3602976A827ED45303FBAA /* Assets.xcassets */,
 				518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */,
 				EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */,
+				C98C13F5DA987B8AA7AF3255 /* Info.plist */,
+				6050229EDB84731DB788BF3A /* LiveRoomMap.swift */,
+				C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */,
 				B24CB24A93EE055427841733 /* RoomplanApp.swift */,
 				05453098BCEE6AAE95396045 /* Geometry */,
 			);
@@ -110,6 +130,7 @@
 			buildPhases = (
 				08F4B5FE64611DF7E4DB1E2E /* Sources */,
 				3C6399439C520486097B950B /* Resources */,
+				BD3A9A0C9CFE3D693BF5B7A9 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -117,6 +138,7 @@
 			);
 			name = Roomplan;
 			packageProductDependencies = (
+				0DD69F458422E3FF370BC61C /* GoogleSignIn */,
 			);
 			productName = Roomplan;
 			productReference = 9939679621458CF134656D46 /* Roomplan.app */;
@@ -165,6 +187,9 @@
 			);
 			mainGroup = 3D56FB2BBFF3997960D04CBA;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0AA0EADFE12790646D993A52 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
@@ -202,6 +227,8 @@
 				4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */,
 				488ED675BD25C401C5F7008B /* ContentView.swift in Sources */,
 				D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */,
+				5E1FFAD73EC44270171A4A1D /* LiveRoomMap.swift in Sources */,
+				E3699362E41B4E791EE554A5 /* RoomAnnotation.swift in Sources */,
 				ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */,
 				9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */,
 				964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */,
@@ -233,7 +260,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Roomplan/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Floorplan Scan";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan rooms with RoomPlan.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -255,7 +283,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Roomplan/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Floorplan Scan";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera access is required to scan rooms with RoomPlan.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -457,6 +486,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0AA0EADFE12790646D993A52 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0DD69F458422E3FF370BC61C /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0AA0EADFE12790646D993A52 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 94DA85B9571AA9091FDDDD1D /* Project object */;
 }

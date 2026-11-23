@@ -4,6 +4,7 @@ import WebKit
 
 struct ContentView: View {
     @StateObject private var store = CaptureStore()
+    @StateObject private var annotations = RoomAnnotationClient.shared
 
     var body: some View {
         NavigationStack {
@@ -11,13 +12,24 @@ struct ContentView: View {
                 if store.scanning {
                     ZStack(alignment: .bottom) {
                         CaptureCamera(view: store.captureView).ignoresSafeArea(edges: .bottom)
-                        VStack(spacing: 16) {
-                            Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
-                            Button("Finish room", action: store.finish)
-                                .buttonStyle(.borderedProminent).controlSize(.large)
+                        VStack {
+                            HStack {
+                                Spacer()
+                                LiveRoomMap(snapshot: store.liveMap, camera: store.cameraPose)
+                                    .frame(width: 180, height: 180)
+                                    .padding(6)
+                                    .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 16))
+                            }
+                            Spacer()
+                            VStack(spacing: 16) {
+                                Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
+                                Button("Finish room", action: store.finish)
+                                    .buttonStyle(.borderedProminent).controlSize(.large)
+                            }
+                            .padding().frame(maxWidth: .infinity)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                         }
-                        .padding().frame(maxWidth: .infinity)
-                        .background(.regularMaterial)
+                        .padding(.horizontal)
                     }
                 } else {
                     List {
@@ -39,6 +51,22 @@ struct ContentView: View {
                             } else {
                                 Text("Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
                                     .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        Section("Romrapport") {
+                            if annotations.signedIn {
+                                Label("Innlogget for romrapporter", systemImage: "checkmark.circle")
+                            } else {
+                                Button {
+                                    Task { await annotations.signIn() }
+                                } label: {
+                                    Label("Logg inn for romrapporter", systemImage: "person.crop.circle")
+                                }
+                                Text("Gemini bruker opptil 12 bilder fra skanningen til å gi rommet navn og skrive en kort rapport.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                            if let error = annotations.error {
+                                Text(error).font(.footnote).foregroundStyle(.red)
                             }
                         }
                         if store.rooms.contains(where: { $0.sessionID != nil }) {
@@ -63,7 +91,11 @@ struct ContentView: View {
                                 } label: {
                                     VStack(alignment: .leading) {
                                         Text(room.name)
-                                        Text(room.createdAt, style: .date).font(.caption).foregroundStyle(.secondary)
+                                        if store.annotationPending.contains(room.id) {
+                                            Text("Lager romrapport …").font(.caption).foregroundStyle(.secondary)
+                                        } else {
+                                            Text(room.createdAt, style: .date).font(.caption).foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                             }
@@ -78,6 +110,7 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { store.message = nil }
             } message: { Text(store.message ?? "") }
         }
+        .task { await annotations.restore() }
     }
 }
 
@@ -86,6 +119,7 @@ struct RoomDetail: View {
     @ObservedObject var store: CaptureStore
     @State private var exports: [URL] = []
     @State private var preview: String?
+    @State private var annotation: RoomAnnotation?
     @State private var warnings: [String] = []
     @State private var error: String?
 
@@ -99,6 +133,23 @@ struct RoomDetail: View {
             if let preview {
                 Section("Room plan") { SVGPreview(svg: preview).frame(height: 300) }
             }
+            if store.annotationPending.contains(room.id) {
+                Section("Romrapport") {
+                    ProgressView("Lager romrapport …")
+                }
+            }
+            if let annotation {
+                Section("Romrapport") {
+                    Text(annotation.summary)
+                    LabeledContent("Peis", value: annotation.features.fireplace.title)
+                    LabeledContent("Toalett", value: annotation.features.toilet.title)
+                    LabeledContent("Ventilasjon", value: annotation.features.ventilation.title)
+                    LabeledContent("Vinduer", value: annotation.features.windows.title)
+                    ShareLink(item: annotation.markdown) {
+                        Label("Del romrapport", systemImage: "square.and.arrow.up")
+                    }
+                }
+            }
             if !warnings.isEmpty {
                 Section("Review") { ForEach(warnings, id: \.self) { Text($0).font(.footnote) } }
             }
@@ -110,13 +161,28 @@ struct RoomDetail: View {
                 if let error { Text(error).foregroundStyle(.red) }
             }
         }
-        .navigationTitle(room.name)
-        .onAppear { loadPreview() }
+        .navigationTitle(annotation?.name ?? room.name)
+        .onAppear {
+            loadAnnotation()
+            loadPreview()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: RoomAnnotationStore.didUpdate)) { notification in
+            guard let directory = notification.object as? URL,
+                  directory == store.roomDirectory(room) else { return }
+            loadAnnotation()
+            loadPreview()
+            exports = []
+        }
+    }
+
+    private func loadAnnotation() {
+        annotation = RoomAnnotationStore.load(directory: store.roomDirectory(room))
     }
 
     private func loadPreview() {
         do {
-            let document = RoomPlanConverter.convert(try store.capturedRoom(room))
+            let converted = RoomPlanConverter.convert(try store.capturedRoom(room))
+            let document = annotation?.applying(to: converted) ?? converted
             preview = SVGRenderer.render(document: document)
             warnings = document.warnings
         } catch { self.error = "Could not load this room: \(error.localizedDescription)" }
@@ -126,7 +192,8 @@ struct RoomDetail: View {
         do {
             let capture = try store.capturedRoom(room)
             let directory = store.roomDirectory(room)
-            let document = RoomPlanConverter.convert(capture)
+            let converted = RoomPlanConverter.convert(capture)
+            let document = RoomAnnotationStore.load(directory: directory)?.applying(to: converted) ?? converted
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let json = directory.appending(path: "floorplan.json")
@@ -179,7 +246,14 @@ struct FloorDetail: View {
                     NavigationLink(room.name) { RoomDetail(room: room, store: store) }
                 }
             }
-        }.navigationTitle("Floor")
+        }
+        .navigationTitle("Floor")
+        .onReceive(NotificationCenter.default.publisher(for: RoomAnnotationStore.didUpdate)) { notification in
+            guard let directory = notification.object as? URL,
+                  rooms.contains(where: { store.roomDirectory($0) == directory }),
+                  preview != nil, !busy else { return }
+            Task { await prepare() }
+        }
     }
 
     @MainActor private func prepare() async {
@@ -194,8 +268,11 @@ struct FloorDetail: View {
             let structure = try await StructureBuilder(options: [.beautifyObjects]).capturedStructure(from: captures)
             var document = FloorplanDocument()
             for capture in structure.rooms {
-                let name = zip(ordered, captures).first { $0.1.identifier == capture.identifier }?.0.name
-                document.add(RoomPlanConverter.convert(capture), roomName: name)
+                let saved = zip(ordered, captures).first { $0.1.identifier == capture.identifier }?.0
+                let converted = RoomPlanConverter.convert(capture)
+                let annotation = saved.flatMap { RoomAnnotationStore.load(directory: store.roomDirectory($0)) }
+                let annotated = annotation?.applying(to: converted) ?? converted
+                document.add(annotated, roomName: annotation?.name ?? saved?.name)
             }
             let svg = SVGRenderer.render(document: document)
             let directory = store.roomDirectory(ordered[0])

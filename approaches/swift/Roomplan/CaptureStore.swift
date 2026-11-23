@@ -19,6 +19,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     @Published var processing = false
     @Published var instruction = "Move slowly around the room, keeping walls and openings in view."
     @Published private(set) var captureView: RoomCaptureView
+    @Published private(set) var liveMap = LiveMapSnapshot()
+    @Published private(set) var cameraPose: LiveCameraPose?
+    @Published private(set) var annotationPending: Set<UUID> = []
+    private var savedFloorMap = LiveMapSnapshot()
+    private let frameSampler = RoomFrameSampler()
     private let directory: URL
     private var sessionID = UUID()
     private var trackingTask: Task<Void, Never>?
@@ -45,19 +50,42 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         let authorized = await AVCaptureDevice.requestAccess(for: .video)
         guard authorized else { message = "Allow camera access in Settings to scan a room."; return }
         stopping = false
+        frameSampler.reset()
+        savedFloorMap = LiveMapSnapshot()
+        for entry in rooms where entry.sessionID == sessionID {
+            if let room = try? capturedRoom(entry) {
+                savedFloorMap.add(room, name: entry.name)
+            }
+        }
+        liveMap = savedFloorMap
+        cameraPose = nil
         scanning = true
         captureView.captureSession.run(configuration: RoomCaptureSession.Configuration())
         trackingTask = Task {
             while !Task.isCancelled && scanning {
-                if let state = captureView.captureSession.arSession.currentFrame?.camera.trackingState {
-                    switch state {
-                    case .limited(.relocalizing): instruction = "Tracking is relocalizing. Return to a previously scanned area and move slowly."
-                    case .limited: instruction = "Tracking is limited. Move slowly and point at a well-lit, detailed area."
-                    case .notAvailable: instruction = "Tracking is unavailable. Return to a previously scanned area."
-                    case .normal: break
+                if let frame = captureView.captureSession.arSession.currentFrame {
+                    switch frame.camera.trackingState {
+                    case .limited(.relocalizing):
+                        instruction = "Tracking is relocalizing. Return to a previously scanned area and move slowly."
+                        cameraPose = nil
+                    case .limited:
+                        instruction = "Tracking is limited. Move slowly and point at a well-lit, detailed area."
+                        cameraPose = nil
+                    case .notAvailable:
+                        instruction = "Tracking is unavailable. Return to a previously scanned area."
+                        cameraPose = nil
+                    case .normal:
+                        let transform = frame.camera.transform
+                        cameraPose = LiveCameraPose(
+                            position: LiveMapPoint(Double(transform.columns.3.x), Double(transform.columns.3.z)),
+                            forward: LiveMapPoint(-Double(transform.columns.2.x), -Double(transform.columns.2.z))
+                        )
+                    }
+                    if RoomAnnotationClient.shared.signedIn {
+                        frameSampler.sample(frame.capturedImage)
                     }
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
     }
@@ -67,6 +95,20 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         stopping = true
         processing = true
         captureView.captureSession.stop(pauseARSession: false)
+    }
+
+    nonisolated func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+        let sessionIdentity = ObjectIdentifier(session)
+        let snapshot = LiveMapSnapshot(room)
+        Task { @MainActor [weak self] in
+            guard let self, self.scanning,
+                  ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
+            var combined = self.savedFloorMap
+            combined.walls.append(contentsOf: snapshot.walls)
+            combined.doors.append(contentsOf: snapshot.doors)
+            combined.windows.append(contentsOf: snapshot.windows)
+            self.liveMap = combined
+        }
     }
 
     nonisolated func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
@@ -93,6 +135,8 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             guard let self, ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
             self.scanning = false
             self.trackingTask?.cancel()
+            let frames = self.frameSampler.frames
+            self.frameSampler.reset()
             if let errorDescription {
                 self.processing = false
                 self.message = "Scan ended: \(errorDescription). Previously saved rooms are still available."
@@ -101,7 +145,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             self.processing = true
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
-                try self.save(room)
+                let entry = try self.save(room)
+                if RoomAnnotationClient.shared.signedIn && !frames.isEmpty {
+                    self.annotationPending.insert(entry.id)
+                    Task { await self.annotate(room, entry: entry, frames: frames) }
+                }
             } catch { self.message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
             self.processing = false
         }
@@ -116,7 +164,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         captureView.captureSession.delegate = self
     }
 
-    private func save(_ room: CapturedRoom) throws {
+    private func save(_ room: CapturedRoom) throws -> SavedRoom {
         let entry = SavedRoom(id: UUID(), name: "Room \(rooms.count + 1)", createdAt: .now, sessionID: sessionID)
         let url = roomDirectory(entry)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -124,9 +172,26 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             try JSONEncoder().encode(room).write(to: url.appending(path: "capture.json"), options: .atomic)
             try JSONEncoder().encode(entry).write(to: url.appending(path: "info.json"), options: .atomic)
             rooms.insert(entry, at: 0)
+            return entry
         } catch {
             try? FileManager.default.removeItem(at: url)
             throw error
+        }
+    }
+
+    private func annotate(_ room: CapturedRoom, entry: SavedRoom, frames: [String]) async {
+        defer { annotationPending.remove(entry.id) }
+        do {
+            let annotation = try await RoomAnnotationClient.shared.analyze(frames: frames, room: room)
+            guard let index = rooms.firstIndex(where: { $0.id == entry.id }) else { return }
+            let directory = roomDirectory(entry)
+            try RoomAnnotationStore.save(annotation, directory: directory)
+            var updated = rooms[index]
+            updated.name = annotation.name
+            try JSONEncoder().encode(updated).write(to: directory.appending(path: "info.json"), options: .atomic)
+            rooms[index] = updated
+        } catch {
+            message = "Rommet er lagret, men rapporten kunne ikke lages: \(error.localizedDescription)"
         }
     }
 

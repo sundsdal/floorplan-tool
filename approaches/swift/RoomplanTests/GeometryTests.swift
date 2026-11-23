@@ -4,6 +4,24 @@ import XCTest
 @testable import Roomplan
 
 final class GeometryTests: XCTestCase {
+  func testAnnotationChangesOnlyRoomNameAndType() throws {
+    let fixture = try XCTUnwrap(
+      Bundle(for: Self.self).url(forResource: "rotated-l", withExtension: "json"))
+    let original = try JSONDecoder().decode(FloorplanDocument.self, from: Data(contentsOf: fixture))
+    let annotation = RoomAnnotation(
+      name: "Kjøkken", type: "kitchen",
+      features: .init(fireplace: .not_observed, toilet: .not_observed, ventilation: .uncertain, windows: .observed),
+      summary: "Et kjøkken med vindu.")
+    let updated = annotation.applying(to: original)
+    XCTAssertEqual(updated.floorplan.rooms[0].name, "Kjøkken")
+    XCTAssertEqual(updated.floorplan.rooms[0].type, "kitchen")
+    XCTAssertEqual(updated.floorplan.rooms[0].polygon, original.floorplan.rooms[0].polygon)
+    XCTAssertEqual(updated.floorplan.walls.map(\.id), original.floorplan.walls.map(\.id))
+    XCTAssertTrue(SVGRenderer.render(document: updated).contains("Kjøkken"))
+    let exported = try JSONDecoder().decode(FloorplanDocument.self, from: JSONEncoder().encode(updated))
+    XCTAssertEqual(exported.floorplan.rooms[0].type, "kitchen")
+  }
+
   func testSharedRotatedFixtureAndSVG() throws {
     let fixture = try XCTUnwrap(
       Bundle(for: Self.self).url(forResource: "rotated-l", withExtension: "json"))
