@@ -54,6 +54,16 @@ struct SpatialRoom: Codable, Sendable {
     }
 }
 
+// Only an unambiguous interior match is reliable enough to identify a revisit.
+func knownRoom(at point: LiveMapPoint, in rooms: [SpatialRoom]) -> SpatialRoom? {
+    let matches = rooms.filter { $0.contains(point) }
+    return matches.count == 1 ? matches[0] : nil
+}
+
+func crossedDoor(previous: Double, current: Double) -> Bool {
+    abs(previous) > 0.3 && abs(current) > 0.3 && previous * current < 0
+}
+
 struct LiveMapSnapshot: Sendable {
     var walls: [LiveMapLine] = []
     var doors: [LiveMapLine] = []
@@ -129,11 +139,14 @@ struct LiveCameraPose: Sendable {
 struct LiveRoomMap: View {
     let snapshot: LiveMapSnapshot
     let camera: LiveCameraPose?
+    var destinationRoomID: String? = nil
 
     var body: some View {
         GeometryReader { geometry in
             Canvas { context, size in
                 let points = snapshot.walls.flatMap { [$0.start, $0.end] }
+                    + snapshot.labels.map(\.position)
+                    + snapshot.rooms.flatMap(\.polygon)
                     + (camera.map { [$0.position] } ?? [])
                 guard !points.isEmpty else { return }
                 let minX = points.map(\.x).min() ?? 0
@@ -159,10 +172,23 @@ struct LiveRoomMap: View {
                     }
                     context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
                 }
+                for room in snapshot.rooms where room.id.lowercased() == destinationRoomID?.lowercased() {
+                    guard let first = room.polygon.first else { continue }
+                    var path = Path()
+                    path.move(to: project(first))
+                    for point in room.polygon.dropFirst() { path.addLine(to: project(point)) }
+                    path.closeSubpath()
+                    context.fill(path, with: .color(.orange.opacity(0.3)))
+                    context.stroke(path, with: .color(.orange), lineWidth: 2)
+                }
                 stroke(snapshot.walls, color: .white, width: 3)
                 stroke(snapshot.doors, color: .mint, width: 4)
                 stroke(snapshot.windows, color: .cyan, width: 4)
                 for label in snapshot.labels {
+                    if label.id.lowercased() == destinationRoomID?.lowercased() {
+                        let point = project(label.position)
+                        context.fill(Path(ellipseIn: CGRect(x: point.x - 9, y: point.y - 9, width: 18, height: 18)), with: .color(.orange))
+                    }
                     context.draw(
                         Text(label.label).font(.caption2.weight(.semibold)).foregroundStyle(.white),
                         at: project(label.position)

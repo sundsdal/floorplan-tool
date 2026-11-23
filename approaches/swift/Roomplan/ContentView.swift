@@ -25,7 +25,7 @@ struct ContentView: View {
                         VStack {
                             HStack {
                                 Spacer()
-                                LiveRoomMap(snapshot: store.liveMap, camera: store.cameraPose)
+                                LiveRoomMap(snapshot: store.liveMap, camera: store.cameraPose, destinationRoomID: inspection.request?.roomId)
                                     .frame(width: 180, height: 180)
                                     .padding(6)
                                     .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 16))
@@ -41,7 +41,7 @@ struct ContentView: View {
                                 }
                                 if inspection.link != nil { Text(inspection.status).font(.caption) }
                                 Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
-                                Button("Finish room", action: store.finish)
+                                Button(inspection.link == nil ? "Finish room" : "Avslutt skanning", action: store.finish)
                                     .buttonStyle(.borderedProminent).controlSize(.large)
                             }
                             .padding().frame(maxWidth: .infinity)

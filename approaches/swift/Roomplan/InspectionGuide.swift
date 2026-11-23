@@ -129,6 +129,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     private var locationSending = false
     private var pendingLocation: SpatialLocation?
     private var snapshotSending = false
+    private var eventTask: Task<Void, Never>?
+    private var eventCursor = 0
+    private var pendingEvents: [Data] = []
+    var onRoomNamed: ((String, String) -> Void)?
     private let imageContext = CIContext()
     private let redirectDelegate = InspectionRedirectDelegate()
     private lazy var httpSession = URLSession(configuration: .ephemeral, delegate: redirectDelegate, delegateQueue: nil)
@@ -171,7 +175,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         busy = true
         defer { busy = false }
         do {
-            let payload = try JSONSerialization.data(withJSONObject: ["mode": "inspection", "work": pendingLink.work])
+            let payload = try JSONSerialization.data(withJSONObject: ["mode": "inspection", "work": pendingLink.work,
+                "inspectionLink": ["job": pendingLink.job, "visit": pendingLink.visit,
+                                   "origin": pendingLink.origin.absoluteString, "token": pendingLink.token]])
             let data = try await cloudRequest("/api/livekit/session", method: "POST", body: payload)
             let session = try JSONDecoder().decode(GuideSession.self, from: data)
             self.session = session
@@ -182,6 +188,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             self.track = track
             try await room.localParticipant.setMicrophone(enabled: true)
             connected = true
+            eventCursor = 0
+            pendingEvents = (try? Data(contentsOf: eventFile(for: pendingLink.visit)))
+                .flatMap { try? JSONDecoder().decode([Data].self, from: $0) } ?? []
+            eventTask = Task { [weak self] in await self?.syncEvents() }
             status = "Veilederen er tilkoblet."
             if session.keepalive == true {
                 keepaliveTask = Task { [weak self] in await self?.keepAlive() }
@@ -192,6 +202,77 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             self.pendingLink = pendingLink
             status = "Kunne ikke koble til veilederen. Prøv igjen."
             throw error
+        }
+    }
+
+    func postEvent(_ type: String, roomID: String, data: [String: Any]) {
+        let value: [String: Any] = ["id": UUID().uuidString.lowercased(), "type": type,
+                                    "roomId": roomID, "data": data,
+                                    "capturedAt": Int64(Date().timeIntervalSince1970 * 1000)]
+        guard let encoded = try? JSONSerialization.data(withJSONObject: value) else { return }
+        pendingEvents.append(encoded)
+        persistEvents()
+    }
+
+    private func persistEvents() {
+        guard let link else { return }
+        guard let data = try? JSONEncoder().encode(pendingEvents) else { return }
+        try? data.write(to: eventFile(for: link.visit), options: [.atomic, .completeFileProtection])
+    }
+
+    private func eventFile(for visit: String) -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appending(path: "inspection-events-\(visit).json")
+    }
+
+    private func syncEvents() async {
+        while !Task.isCancelled, let session {
+            let path = "/api/livekit/session/\(session.sessionId)/inspection/events"
+            do {
+                // A rejected or temporarily unavailable outbound event must not prevent
+                // receiving the request which may make that event valid.
+                try? await flushEvents()
+                let result = try await cloudRequest("\(path)?after=\(eventCursor)", timeout: 12)
+                if let envelope = try JSONSerialization.jsonObject(with: result) as? [String: Any],
+                   let events = envelope["events"] as? [[String: Any]],
+                   let cursor = envelope["cursor"] as? Int {
+                    for event in events {
+                        guard let type = event["type"] as? String,
+                              let roomID = event["roomId"] as? String,
+                              let data = event["data"] as? [String: Any] else { continue }
+                        if type == "room.named", let name = data["name"] as? String {
+                            if let index = roomTimes.firstIndex(where: { $0.id.lowercased() == roomID.lowercased() }) {
+                                roomTimes[index].name = name
+                            }
+                            if activeRoom?.0.lowercased() == roomID.lowercased() { activeRoom = (roomID, name) }
+                            onRoomNamed?(roomID, name)
+                        } else if (type == "evidence.requested" || type == "evidence.retry"), let requestID = data["requestId"] as? String,
+                                  let target = data["target"] as? String,
+                                  !evidence.contains(where: { $0.requestId == requestID }) {
+                            request = InspectionRequest(requestId: requestID, roomId: roomID,
+                                roomName: data["roomName"] as? String, target: target,
+                                prompt: data["prompt"] as? String ?? target)
+                        } else if type == "evidence.saved", let requestID = data["requestId"] as? String,
+                                  request?.requestId == requestID {
+                            request = nil
+                        }
+                    }
+                    eventCursor = cursor
+                }
+            } catch { /* Retry the same event and cursor after reconnecting. */ }
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+
+    func flushEvents() async throws {
+        guard let session else { throw URLError(.notConnectedToInternet) }
+        while let event = pendingEvents.first {
+            _ = try await cloudRequest("/api/livekit/session/\(session.sessionId)/inspection/events", method: "POST", body: event, timeout: 12)
+            // Another caller may have flushed this same id while the request was in flight.
+            if pendingEvents.first == event {
+                pendingEvents.removeFirst()
+                persistEvents()
+            }
         }
     }
 
@@ -388,7 +469,13 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             status = "Kunne ikke ta bildet. Prøv igjen."
             return
         }
-        evidence.append(InspectionEvidence(roomId: request.roomId.lowercased(), target: request.target, jpeg: jpeg.base64EncodedString(), requestId: request.requestId))
+        let encodedImage = jpeg.base64EncodedString()
+        postEvent("evidence.saved", roomID: request.roomId.lowercased(), data: ["requestId": request.requestId, "target": request.target, "jpeg": encodedImage])
+        do { try await flushEvents() } catch {
+            status = "Kunne ikke lagre bildet. Prøv igjen."
+            return
+        }
+        evidence.append(InspectionEvidence(roomId: request.roomId.lowercased(), target: request.target, jpeg: encodedImage, requestId: request.requestId))
         self.request = nil
         // Keep the notification until LiveKit accepts it, independent of the local photo.
         if let data = try? JSONSerialization.data(withJSONObject: ["requestId": request.requestId, "roomId": request.roomId.lowercased()]) {
@@ -435,6 +522,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
 
     func finalize() async throws {
         guard !finalized, let session, let link else { return }
+        try await flushEvents()
         let body = try JSONSerialization.data(withJSONObject: [
             "work": link.work,
             "rooms": roomTimes.map { ["roomId": $0.id, "name": $0.name, "seconds": $0.seconds] },
@@ -460,6 +548,17 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         let report: String?
     }
 
+    func publishRooms(_ rooms: [ScannedRoom]) async throws {
+        for room in rooms {
+            let encoded = try JSONEncoder().encode(room.document)
+            let document = try JSONSerialization.jsonObject(with: encoded)
+            var data: [String: Any] = ["name": room.name, "document": document]
+            if let report = room.report { data["report"] = report }
+            postEvent("room.upsert", roomID: room.roomId, data: data)
+        }
+        try await flushEvents()
+    }
+
     func submit(rooms: [ScannedRoom]) async throws {
         guard let link else { return }
         struct Result: Encodable {
@@ -479,6 +578,8 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     }
 
     func disconnect() async {
+        eventTask?.cancel()
+        eventTask = nil
         recordingTask?.cancel()
         keepaliveTask?.cancel()
         reliableTask?.cancel()

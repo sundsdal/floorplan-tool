@@ -4,6 +4,21 @@ import XCTest
 @testable import Roomplan
 
 final class GeometryTests: XCTestCase {
+  func testRevisitUsesNamedRoomAndRejectsAmbiguousMatches() {
+    let polygon = [LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3)]
+    let named = SpatialRoom(id: "stable-id", name: "Kjøkken", polygon: polygon)
+    XCTAssertNil(knownRoom(at: LiveMapPoint(5, 1), in: [named]))
+    let revisit = knownRoom(at: LiveMapPoint(2, 1), in: [named])
+    XCTAssertEqual(revisit?.id, "stable-id")
+    XCTAssertEqual(revisit?.name, "Kjøkken")
+    XCTAssertNil(knownRoom(at: LiveMapPoint(2, 1), in: [named, named]))
+  }
+
+  func testDoorCrossingRequiresBothSidesOutsideHysteresis() {
+    XCTAssertFalse(crossedDoor(previous: -0.5, current: 0.2))
+    XCTAssertFalse(crossedDoor(previous: -0.5, current: -0.7))
+    XCTAssertTrue(crossedDoor(previous: -0.5, current: 0.5))
+  }
   func testRoomContainmentExcludesEdgesAndOutside() {
     let room = SpatialRoom(id: "room", name: "Bad", polygon: [
       LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3),
