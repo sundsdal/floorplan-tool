@@ -126,8 +126,23 @@ export async function createSession(
 	options: CaptureMode = {},
 	linkedId?: string,
 ) {
-	const { c, room, dispatch } = clients();
+	const { c, room, dispatch, egress } = clients();
 	const sessionId = linkedId ?? randomUUID();
+	if (linkedId) {
+		const items = await egress.listEgress({ roomName: roomName(sessionId) });
+		const ended = items.some(
+			(item) =>
+				![EgressStatus.EGRESS_STARTING, EgressStatus.EGRESS_ACTIVE].includes(
+					item.status,
+				),
+		);
+		if (ended || (!items.length && (await hasFinalRecording(sessionId))))
+			return {
+				sessionId,
+				sessionToken: capability(sessionId, "session"),
+				finalizeOnly: true as const,
+			};
+	}
 	const roomId = roomName(sessionId);
 	const identity = participantIdentity(sessionId);
 	await room.createRoom({
@@ -175,6 +190,9 @@ export async function createSession(
 		throw error;
 	}
 }
+async function hasFinalRecording(sessionId: string) {
+	return (await import("./livekit-media")).hasFinalRecording(sessionId);
+}
 const starts = new Map<
 	string,
 	Promise<{ egressId: string; startedAt: number | null }>
@@ -211,7 +229,8 @@ async function startRecordingOnce(sessionId: string) {
 			egressId: active.egressId,
 			startedAt: mediaStart(active),
 		};
-	if (existing.length) throw new Error("Recording already ended");
+	if (existing.length || (await hasFinalRecording(sessionId)))
+		throw new Error("Recording already ended");
 	const prefix = `captures/${sessionId}`;
 	const segments = new SegmentedFileOutput({
 		protocol: SegmentedFileProtocol.HLS_PROTOCOL,
@@ -237,7 +256,10 @@ async function startRecordingOnce(sessionId: string) {
 export async function stopRecording(sessionId: string) {
 	const { egress } = clients();
 	const items = await egress.listEgress({ roomName: roomName(sessionId) });
-	if (!items.length) throw new Error("Recording not started");
+	if (!items.length) {
+		if (await hasFinalRecording(sessionId)) return;
+		throw new Error("Recording not started");
+	}
 	for (const item of items) {
 		if (
 			[EgressStatus.EGRESS_STARTING, EgressStatus.EGRESS_ACTIVE].includes(

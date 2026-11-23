@@ -11,6 +11,12 @@ struct SavedRoom: Identifiable, Codable {
     var sessionID: UUID? = nil
 }
 
+// A revisit gathers evidence against the existing room rather than a partial new scan.
+func existingInspectionRoom(_ id: UUID?, in records: [(id: UUID, saved: SavedRoom)]) -> SavedRoom? {
+    guard let id else { return nil }
+    return records.first { $0.id == id }?.saved
+}
+
 @MainActor
 final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate {
     @Published var rooms: [SavedRoom] = []
@@ -65,11 +71,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     var supported: Bool { RoomCaptureSession.isSupported }
 
     func start() async {
-        guard !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted else { return }
+        guard !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted, !inspection.finalizeOnly else { return }
         guard supported else { message = "RoomPlan requires a supported iPhone or iPad with LiDAR."; return }
         let generation = scanGeneration
         let authorized = await AVCaptureDevice.requestAccess(for: .video)
-        guard generation == scanGeneration, !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted else { return }
+        guard generation == scanGeneration, !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted, !inspection.finalizeOnly else { return }
         guard authorized else { message = "Allow camera access in Settings to scan a room."; return }
         stopping = false
         if inspection.link != nil {
@@ -200,6 +206,10 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         Task { @MainActor [weak self] in
             guard let self, self.scanning,
                   ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
+            if existingInspectionRoom(self.inspectionRoomID, in: self.inspectionRooms) != nil {
+                self.liveMap = self.savedFloorMap
+                return
+            }
             var combined = self.savedFloorMap
             combined.walls.append(contentsOf: snapshot.walls)
             combined.doors.append(contentsOf: snapshot.doors)
@@ -260,37 +270,44 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             }
             self.processing = true
             do {
-                let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
-                var entry = try self.save(room)
-                if let id = self.inspectionRoomID {
-                    if let index = self.rooms.firstIndex(where: { $0.id == entry.id }) {
-                        entry.name = self.inspectionRoomName
-                        try JSONEncoder().encode(entry).write(to: self.roomDirectory(entry).appending(path: "info.json"), options: .atomic)
-                        self.rooms[index] = entry
-                    }
-                    self.inspectionRooms.removeAll { $0.id == id }
-                    self.inspectionRooms.append((id: id, saved: entry))
-                    self.persistInspectionRooms()
-                    self.savedFloorMap = LiveMapSnapshot()
-                    for item in self.inspectionRooms where item.saved.sessionID == self.sessionID {
-                        if let captured = try? self.capturedRoom(item.saved) {
-                            let name = self.rooms.first(where: { $0.id == item.saved.id })?.name ?? item.saved.name
-                            self.savedFloorMap.add(captured, name: name, roomID: item.id.uuidString.lowercased())
-                        }
-                    }
+                if let id = self.inspectionRoomID,
+                   let existing = existingInspectionRoom(id, in: self.inspectionRooms) {
+                    let name = self.rooms.first(where: { $0.id == existing.id })?.name ?? existing.name
                     self.liveMap = self.savedFloorMap
-                    self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
-                    var document = RoomPlanConverter.convert(room)
-                    if !document.floorplan.rooms.isEmpty { document.floorplan.rooms[0].id = id.uuidString.lowercased() }
-                    if let encoded = try? JSONEncoder().encode(document),
-                       let object = try? JSONSerialization.jsonObject(with: encoded) {
-                        self.inspection.postEvent("room.upsert", roomID: id.uuidString.lowercased(), data: ["name": entry.name, "document": object])
-                    }
+                    self.inspection.announceRoom(id: id.uuidString.lowercased(), name: name, phase: "finish")
                     self.inspectionRoomID = nil
-                }
-                if RoomAnnotationClient.shared.signedIn && !frames.isEmpty {
-                    self.annotationPending.insert(entry.id)
-                    Task { await self.annotate(room, entry: entry, frames: frames) }
+                } else {
+                    let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
+                    var entry = try self.save(room)
+                    if let id = self.inspectionRoomID {
+                        if let index = self.rooms.firstIndex(where: { $0.id == entry.id }) {
+                            entry.name = self.inspectionRoomName
+                            try JSONEncoder().encode(entry).write(to: self.roomDirectory(entry).appending(path: "info.json"), options: .atomic)
+                            self.rooms[index] = entry
+                        }
+                        self.inspectionRooms.append((id: id, saved: entry))
+                        self.persistInspectionRooms()
+                        self.savedFloorMap = LiveMapSnapshot()
+                        for item in self.inspectionRooms where item.saved.sessionID == self.sessionID {
+                            if let captured = try? self.capturedRoom(item.saved) {
+                                let name = self.rooms.first(where: { $0.id == item.saved.id })?.name ?? item.saved.name
+                                self.savedFloorMap.add(captured, name: name, roomID: item.id.uuidString.lowercased())
+                            }
+                        }
+                        self.liveMap = self.savedFloorMap
+                        self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
+                        var document = RoomPlanConverter.convert(room)
+                        if !document.floorplan.rooms.isEmpty { document.floorplan.rooms[0].id = id.uuidString.lowercased() }
+                        if let encoded = try? JSONEncoder().encode(document),
+                           let object = try? JSONSerialization.jsonObject(with: encoded) {
+                            self.inspection.postEvent("room.upsert", roomID: id.uuidString.lowercased(), data: ["name": entry.name, "document": object])
+                        }
+                        self.inspectionRoomID = nil
+                    }
+                    if RoomAnnotationClient.shared.signedIn && !frames.isEmpty {
+                        self.annotationPending.insert(entry.id)
+                        Task { await self.annotate(room, entry: entry, frames: frames) }
+                    }
                 }
             } catch {
                 self.submitAfterCapture = false
@@ -326,7 +343,12 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             inspection.restoreSavedRooms(inspectionRooms.map { $0.id.uuidString })
             inspectionRoomID = nil
             guideNamedRooms = [:]
-            await start()
+            if inspection.finalizeOnly {
+                inspectionFinalizationStarted = true
+                await finishInspection()
+            } else {
+                await start()
+            }
         } catch {
             inspection.status = "Kunne ikke starte befaringen. Kontroller innlogging og tilkobling."
         }
@@ -356,7 +378,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
 
     func finishInspection() async {
         guard inspection.link != nil, !scanning, !processing, !inspection.busy, !evidenceCaptureInProgress else { return }
-        guard hasInspectionRooms else {
+        guard hasInspectionRooms || inspection.finalizeOnly else {
             inspection.status = "Skann minst ett rom før du sender befaringen."
             return
         }

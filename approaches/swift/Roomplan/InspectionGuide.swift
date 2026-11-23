@@ -56,12 +56,15 @@ struct InspectionEvidence: Encodable {
     enum CodingKeys: String, CodingKey { case roomId, target, jpeg }
 }
 
-private struct GuideSession: Decodable {
+struct GuideSession: Decodable {
     let sessionId: String
-    let serverUrl: String
-    let token: String
+    let serverUrl: String?
+    let token: String?
     let sessionToken: String
     let keepalive: Bool?
+    let finalizeOnly: Bool?
+
+    var canCapture: Bool { finalizeOnly != true && serverUrl != nil && token != nil }
 }
 
 private struct Recording: Decodable { let startedAt: Double? }
@@ -139,6 +142,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     private lazy var httpSession = URLSession(configuration: .ephemeral, delegate: redirectDelegate, delegateQueue: nil)
     private let cloudOrigin = URL(string: "https://floorplan-ai-vrefqfdtpa-lz.a.run.app")!
     var sessionID: String? { session?.sessionId }
+    var finalizeOnly: Bool { session?.finalizeOnly == true }
 
     func receive(_ url: URL) {
         guard link == nil, !busy, !connected else {
@@ -185,16 +189,23 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             let data = try await cloudRequest("/api/livekit/session", method: "POST", body: payload)
             let session = try JSONDecoder().decode(GuideSession.self, from: data)
             self.session = session
+            eventCursor = 0
+            pendingEvents = (try? Data(contentsOf: eventFile(for: pendingLink.visit)))
+                .flatMap { try? JSONDecoder().decode([Data].self, from: $0) } ?? []
+            if session.finalizeOnly == true {
+                status = "Fortsetter innsendingen av opptaket …"
+                return
+            }
+            guard session.canCapture, let serverUrl = session.serverUrl, let token = session.token else {
+                throw URLError(.badServerResponse)
+            }
             let room = Room(delegate: self)
             self.room = room
-            try await room.connect(url: session.serverUrl, token: session.token)
+            try await room.connect(url: serverUrl, token: token)
             let track = await LocalVideoTrack.createBufferTrack(name: "roomplan-camera", source: .camera)
             self.track = track
             try await room.localParticipant.setMicrophone(enabled: true)
             connected = true
-            eventCursor = 0
-            pendingEvents = (try? Data(contentsOf: eventFile(for: pendingLink.visit)))
-                .flatMap { try? JSONDecoder().decode([Data].self, from: $0) } ?? []
             eventTask = Task { [weak self] in await self?.syncEvents() }
             status = "Veilederen er tilkoblet."
             if session.keepalive == true {
@@ -661,6 +672,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         request = nil
         if let disconnectedRoom { await disconnectedRoom.disconnect() }
         track = nil
+        session = nil
         publishing = false
         published = false
         latestLocation = nil

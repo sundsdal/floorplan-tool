@@ -15,6 +15,8 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+class InvalidContext extends Error {}
+
 const finalizing = new Map<
 	string,
 	Promise<Awaited<ReturnType<typeof reviewInspection>>>
@@ -27,9 +29,11 @@ export async function POST(
 	const { sessionId } = await context.params;
 	if (!authorizeSession(sessionId, bearer(request)))
 		return Response.json({ error: "Unauthorized" }, { status: 401 });
-	const input = inspectionFinalizeInput.safeParse(
-		await request.json().catch(() => null),
-	);
+	const input = inspectionFinalizeInput
+		.extend({
+			rooms: inspectionFinalizeInput.shape.rooms.element.array().max(100),
+		})
+		.safeParse(await request.json().catch(() => null));
 	if (!input.success)
 		return Response.json(
 			{ error: "Invalid inspection context" },
@@ -46,6 +50,29 @@ export async function POST(
 			const complete = events?.find((e) => e.type === "inspection.completed");
 			if (complete)
 				return { summary: String(complete.data.summary), requests: [] };
+			const rooms = new Map(
+				payload.rooms.map((room) => [room.roomId.toLowerCase(), room]),
+			);
+			for (const event of events ?? []) {
+				if (
+					(event.type === "room.upsert" || event.type === "room.named") &&
+					event.roomId &&
+					typeof event.data.name === "string"
+				) {
+					const key = event.roomId.toLowerCase();
+					const existing = rooms.get(key);
+					rooms.set(key, {
+						...existing,
+						roomId: existing?.roomId ?? event.roomId,
+						name: event.data.name,
+					});
+				}
+			}
+			const recovered = inspectionFinalizeInput.safeParse({
+				...payload,
+				rooms: [...rooms.values()],
+			});
+			if (!recovered.success) throw new InvalidContext();
 			if (
 				events?.some(
 					(e) =>
@@ -72,19 +99,10 @@ export async function POST(
 				}));
 			const context = events
 				? inspectionFinalizeInput.parse({
-						...payload,
+						...recovered.data,
 						evidence: saved,
-						rooms: payload.rooms.map((r) => ({
-							...r,
-							name:
-								events.findLast(
-									(e) =>
-										e.roomId === r.roomId &&
-										(e.type === "room.named" || e.type === "room.upsert"),
-								)?.data.name ?? r.name,
-						})),
 					})
-				: payload;
+				: recovered.data;
 			const result = await reviewInspection(sessionId, context);
 			if (events)
 				for (const report of result.roomReports ?? []) {
@@ -147,7 +165,14 @@ export async function POST(
 	} catch (error) {
 		return Response.json(
 			{ error: "Inspection review unavailable" },
-			{ status: error instanceof RecordingNotReady ? 425 : 503 },
+			{
+				status:
+					error instanceof InvalidContext
+						? 400
+						: error instanceof RecordingNotReady
+							? 425
+							: 503,
+			},
 		);
 	} finally {
 		if (finalizing.get(sessionId) === result) finalizing.delete(sessionId);

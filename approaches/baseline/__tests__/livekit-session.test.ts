@@ -7,8 +7,13 @@ const mocks = vi.hoisted(() => ({
 	deleteRoom: vi.fn(),
 	createDispatch: vi.fn(),
 	listEgress: vi.fn(),
+	listDispatch: vi.fn(),
+	hasFinalRecording: vi.fn(),
 	startParticipantEgress: vi.fn(),
 	stopEgress: vi.fn(),
+}));
+vi.mock("@/lib/livekit-media", () => ({
+	hasFinalRecording: mocks.hasFinalRecording,
 }));
 vi.mock("livekit-server-sdk", async (importOriginal) => {
 	const original = await importOriginal<typeof import("livekit-server-sdk")>();
@@ -20,6 +25,7 @@ vi.mock("livekit-server-sdk", async (importOriginal) => {
 		},
 		AgentDispatchClient: class {
 			createDispatch = mocks.createDispatch;
+			listDispatch = mocks.listDispatch;
 		},
 		EgressClient: class {
 			listEgress = mocks.listEgress;
@@ -53,6 +59,8 @@ describe("LiveKit session lifecycle", () => {
 		mocks.createRoom.mockResolvedValue({});
 		mocks.createDispatch.mockResolvedValue({});
 		mocks.listEgress.mockResolvedValue([]);
+		mocks.listDispatch.mockResolvedValue([]);
+		mocks.hasFinalRecording.mockResolvedValue(false);
 	});
 	it("issues isolated operator and review capabilities and dispatches the guide", async () => {
 		const session = await createSession();
@@ -83,6 +91,47 @@ describe("LiveKit session lifecycle", () => {
 		expect(metadata.work).toBe("slipe");
 		expect(authorizeReview(session.sessionId, metadata.reviewToken)).toBe(true);
 	});
+	it("returns only finalization credentials for ended linked recordings", async () => {
+		const id = crypto.randomUUID();
+		for (const status of [2, 3]) {
+			mocks.listEgress.mockResolvedValue([{ egressId: "EG_1", status }]);
+			const session = await createSession(
+				{ mode: "inspection", work: "male" },
+				id,
+			);
+			expect(session).toEqual({
+				sessionId: id,
+				sessionToken: expect.any(String),
+				finalizeOnly: true,
+			});
+			expect(authorizeSession(id, session.sessionToken)).toBe(true);
+		}
+		expect(mocks.createRoom).not.toHaveBeenCalled();
+		expect(mocks.createDispatch).not.toHaveBeenCalled();
+	});
+	it("recovers a final playlist after egress history expires without overwriting it", async () => {
+		const id = crypto.randomUUID();
+		mocks.hasFinalRecording.mockResolvedValue(true);
+		expect(await createSession({}, id)).toMatchObject({
+			sessionId: id,
+			finalizeOnly: true,
+		});
+		await stopRecording(id);
+		await expect(startRecording(id)).rejects.toThrow("Recording already ended");
+		expect(mocks.startParticipantEgress).not.toHaveBeenCalled();
+	});
+	it("reopens active and new linked recordings normally", async () => {
+		const id = crypto.randomUUID();
+		for (const items of [[], [{ egressId: "EG_1", status: 1 }]]) {
+			mocks.listEgress.mockResolvedValue(items);
+			const session = await createSession({}, id);
+			expect(session).toMatchObject({
+				sessionId: id,
+				token: expect.any(String),
+			});
+		}
+		expect(mocks.createRoom).toHaveBeenCalledTimes(2);
+	});
 	it("starts participant HLS and stops active recording only once", async () => {
 		const session = await createSession();
 		mocks.startParticipantEgress.mockResolvedValue({
@@ -94,8 +143,8 @@ describe("LiveKit session lifecycle", () => {
 			startedAt: 1700000000000,
 		});
 		const [room, identity, output] = mocks.startParticipantEgress.mock.calls[0];
-		expect(room).toBe(session.roomName);
-		expect(identity).toBe(session.participantIdentity);
+		expect(room).toBe(`capture-${session.sessionId}`);
+		expect(identity).toBe(`capture-user-${session.sessionId}`);
 		expect(output.segments.playlistName).toBe(
 			`captures/${session.sessionId}/recording.m3u8`,
 		);

@@ -52,7 +52,10 @@ struct ContentView: View {
                 } else {
                     List {
                         Section {
-                            if store.processing {
+                            if inspection.finalizeOnly {
+                                Text("Opptaket er avsluttet. Fullfør innsendingen til jobbkortet.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            } else if store.processing {
                                 ProgressView("Preparing room…")
                             } else {
                                 Button { Task { await store.start() } } label: {
@@ -63,7 +66,9 @@ struct ContentView: View {
                             if store.hasActiveFloor && !store.processing && inspection.link == nil {
                                 Button("Finish floor", action: store.finishFloor)
                             }
-                            if !store.supported {
+                            if inspection.finalizeOnly {
+                                EmptyView()
+                            } else if !store.supported {
                                 Text("Room scanning requires a supported device with LiDAR. You can use Floorplan AI for video capture instead. Saved scans can still be viewed and shared.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             } else {
@@ -84,8 +89,8 @@ struct ContentView: View {
                                         .disabled(store.processing || inspection.busy || store.inspectionFinalizationStarted)
                                 }
                                 if inspection.link != nil {
-                                    Button("Send befaring til jobbkortet") { Task { await store.finishInspection() } }
-                                        .disabled(store.processing || inspection.busy || store.evidenceCaptureInProgress || !store.hasInspectionRooms)
+                                    Button(inspection.finalizeOnly ? "Prøv innsending igjen" : "Send befaring til jobbkortet") { Task { await store.finishInspection() } }
+                                        .disabled(store.processing || inspection.busy || store.evidenceCaptureInProgress || (!store.hasInspectionRooms && !inspection.finalizeOnly))
                                 }
                             }
                         }
