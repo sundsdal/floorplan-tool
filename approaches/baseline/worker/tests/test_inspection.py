@@ -125,7 +125,7 @@ async def test_live_location_expires_and_ignores_untrusted_or_older_packets():
     }).encode(), "operator")
     assert coordinator.current_location()["roomId"] == room
     coordinator.location_received -= 21
-    assert coordinator.current_location()["tracking"] == "uncertain"
+    assert coordinator.current_location()["tracking"] == "unavailable"
     coordinator.location_packet(json.dumps({
         "capturedAt": now + 1, "tracking": "unavailable",
     }).encode(), "operator")
@@ -207,4 +207,39 @@ async def test_live_question_is_backgrounded_and_includes_latest_pointing_direct
     release.set()
     await asyncio.wait_for(coordinator.question_task, 1)
     assert answers == ["Vasken til høyre."]
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["missing", "stale", "uncertain", "unavailable", "unmatched"])
+async def test_live_question_forwards_uncertain_location(state):
+    room = str(uuid.uuid4())
+    now = int(time.time() * 1000)
+    received = []
+    async def handler(request):
+        received.append(json.loads(request.content))
+        return httpx.Response(200, json={"summary": "Hvor er du?", "requests": []})
+    async def publish(_):
+        pass
+    coordinator = InspectionCoordinator(
+        base_url="http://test", token="token", session_id="session", work="male",
+        participant_identity="operator", publish=publish, speak=lambda _: None,
+        transport=httpx.MockTransport(handler),
+    )
+    coordinator.room_packet(json.dumps({"roomId": room, "name": "Bad", "seconds": 0, "phase": "start"}).encode(), "operator")
+    if state != "missing":
+        tracking = "tracked" if state in ("stale", "unmatched") else state
+        packet = {"capturedAt": now, "tracking": tracking, "position": {"x": 1, "y": 2}}
+        if state == "stale":
+            packet.update(roomId=room, roomName="Bad")
+        coordinator.location_packet(json.dumps(packet).encode(), "operator")
+        if state == "stale":
+            coordinator.location_received -= 21
+    assert coordinator.ask_hydrogen("Hvor er jeg?")
+    await coordinator.question_task
+    location = received[0]["currentLocation"]
+    assert location["tracking"] == ({"missing": "unavailable", "stale": "unavailable", "unmatched": "uncertain"}.get(state, state))
+    assert location["capturedAt"] >= now
+    assert set(location) == {"capturedAt", "tracking"}
+    assert "currentRoomId" not in received[0]
     await coordinator.close()

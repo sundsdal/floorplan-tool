@@ -114,7 +114,7 @@ class InspectionCoordinator:
     def _timestamp(value):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
-        if not math.isfinite(value) or value <= 0 or value > time.time() * 1000 + 5000:
+        if not math.isfinite(value) or value < 1_000_000_000_000 or value > min(4_200_000_000_000, time.time() * 1000 + 5000):
             return None
         return float(value)
 
@@ -132,17 +132,18 @@ class InspectionCoordinator:
             if tracking == "tracked" and ident:
                 if ident not in self.rooms or not isinstance(name, str) or not name.strip() or len(name) > 80:
                     return
-                location = {"capturedAt": captured_at, "tracking": tracking, "roomId": ident,
+                location = {"capturedAt": int(captured_at), "tracking": tracking, "roomId": ident,
                             "roomName": name.strip()}
             else:
                 location = {"capturedAt": captured_at, "tracking": tracking}
-            for field in ("position", "forward"):
+            for field in (("position", "forward") if tracking == "tracked" and ident else ()):
                 point = item.get(field)
                 if point is not None:
                     if not isinstance(point, dict) or set(point) != {"x", "y"}:
                         return
                     if any(isinstance(point[k], bool) or not isinstance(point[k], (int, float))
-                           or not math.isfinite(point[k]) or abs(point[k]) > 100000 for k in ("x", "y")):
+                           or not math.isfinite(point[k]) or abs(point[k]) > (1.01 if field == "forward" else 10000)
+                           for k in ("x", "y")):
                         return
                     location[field] = point
         except (ValueError, KeyError, TypeError, UnicodeDecodeError):
@@ -168,13 +169,15 @@ class InspectionCoordinator:
             logger.warning("Unable to update live room context")
 
     def current_location(self):
+        now = int(time.time() * 1000)
         if self.location is None:
-            return {"tracking": "unavailable", "message": "Romposisjon er ikke mottatt ennå."}
-        if time.time() - self.location_received > 20 or time.time() * 1000 - self.location_timestamp > 20000:
-            return {"tracking": "uncertain", "message": "Romposisjonen er ikke oppdatert, spør personen hvor de er."}
+            return {"capturedAt": now, "tracking": "unavailable", "message": "Romposisjon er ikke mottatt ennå."}
+        if now - self.location_received * 1000 > 20000 or now - self.location_timestamp > 20000:
+            return {"capturedAt": now, "tracking": "unavailable", "message": "Romposisjonen er ikke oppdatert, spør personen hvor de er."}
         if self.location["tracking"] != "tracked" or not self.location.get("roomId"):
             tracking = self.location["tracking"] if self.location["tracking"] != "tracked" else "uncertain"
-            return {"tracking": tracking, "message": "Rommet er usikkert. Spør personen hvor de er."}
+            return {"capturedAt": int(self.location_timestamp), "tracking": tracking,
+                    "message": "Rommet er usikkert. Spør personen hvor de er."}
         return self.location
 
     def spatial_packet(self, data: bytes, identity: str | None):
@@ -229,9 +232,9 @@ class InspectionCoordinator:
         payload = {"work": self.work, "rooms": list(self.rooms.values()),
                    "evidence": list(self.evidence), "question": question}
         location = self.current_location()
+        payload["currentLocation"] = {key: value for key, value in location.items() if key != "message"}
         if location.get("roomId"):
             payload["currentRoomId"] = location["roomId"]
-            payload["currentLocation"] = location
         if self.started_at is not None:
             end = min(86400, max(0, time.time() - self.started_at - self.lag_seconds))
             if end > 0:

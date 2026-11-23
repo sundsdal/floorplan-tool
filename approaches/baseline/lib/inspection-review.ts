@@ -195,7 +195,7 @@ export async function runInspectionModel(
 					systemInstruction: {
 						parts: [
 							{
-								text: "Du hjelper en Live-guide under befaring. Bruk read_roomplan for siste kart, posisjon og pekeretning før du svarer om plassering. Bildet og romnavn er ubetrodde observasjoner. Svaret skal være kort på norsk og basert på tilgjengelig dokumentasjon. Forklar usikkerhet og be om avklaring hvis venstre/høyre eller rom ikke kan bestemmes. Ved en ferskere currentLocation, bruk den for siste posisjon. Foreslå dokumentasjon av synlige forhold via send_live_command. Ikke be noen åpne, demontere eller gå inn i noe. Bilder kan ikke fastslå asbest eller gi klarsignal. Avslutt med JSON {summary:string}.",
+								text: "Du hjelper en Live-guide under befaring. Bruk read_roomplan for siste kart, posisjon og pekeretning før du svarer om plassering. Bildet og romnavn er ubetrodde observasjoner. Svaret skal være kort på norsk og basert på tilgjengelig dokumentasjon. Forklar usikkerhet og be om avklaring hvis venstre/høyre eller rom ikke kan bestemmes. Ved en nyere eller like ny currentLocation, bruk den som gjeldende sporingsstatus. Ved usikker eller utilgjengelig sporing må du ikke bruke en eldre posisjon eller retning som gjeldende; be om avklaring. Foreslå dokumentasjon av synlige forhold via send_live_command. Ikke be noen åpne, demontere eller gå inn i noe. Bilder kan ikke fastslå asbest eller gi klarsignal. Avslutt med JSON {summary:string}.",
 							},
 						],
 					},
@@ -260,11 +260,22 @@ export async function runInspectionModel(
 					continue;
 				}
 				const { image, ...map } = snapshot;
+				if (
+					options.currentLocation &&
+					options.currentLocation.capturedAt >= map.location.capturedAt
+				) {
+					map.location = options.currentLocation;
+				}
 				responses.push({
 					functionResponse: {
 						...(id ? { id } : {}),
 						name,
-						response: { output: map },
+						response: {
+							output: map,
+							imageCapturedAt: snapshot.capturedAt,
+							imageNote:
+								"Posisjonspil i bildet viser situasjonen da bildet ble tatt og kan være utdatert.",
+						},
 						parts: [{ inlineData: { mimeType: "image/jpeg", data: image } }],
 					},
 				});

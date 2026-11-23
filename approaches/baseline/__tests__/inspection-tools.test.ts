@@ -112,6 +112,46 @@ describe("Hydrogen spatial tools", () => {
 		});
 	});
 
+	it("uses newer uncertain tracking instead of a stored pose", async () => {
+		vi.stubEnv("GOOGLE_CLOUD_PROJECT", "test-project");
+		mockSnapshot.mockResolvedValue(snapshot);
+		const bodies: {
+			contents: {
+				parts: {
+					functionResponse: { response: { output: { location: unknown } } };
+				}[];
+			}[];
+		}[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (_url, init) => {
+				bodies.push(JSON.parse(init.body));
+				return Response.json({
+					candidates: [
+						{
+							content: {
+								parts:
+									bodies.length === 1
+										? [{ functionCall: { name: "read_roomplan", args: {} } }]
+										: [{ text: '{"summary":"Hvor er du?"}' }],
+							},
+						},
+					],
+				});
+			}),
+		);
+		const currentLocation = {
+			capturedAt: snapshot.capturedAt + 1,
+			tracking: "unavailable" as const,
+		};
+		await runInspectionModel("session", context, new Headers(), {
+			currentLocation,
+		});
+		expect(
+			bodies[1].contents[2].parts[0].functionResponse.response.output.location,
+		).toEqual(currentLocation);
+	});
+
 	it("rejects unrecognized rooms and avoids commands for completed evidence", async () => {
 		vi.stubEnv("GOOGLE_CLOUD_PROJECT", "test-project");
 		vi.stubGlobal(
