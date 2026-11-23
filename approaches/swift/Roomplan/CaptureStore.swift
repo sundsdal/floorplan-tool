@@ -17,6 +17,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     @Published var message: String?
     @Published var scanning = false
     @Published var processing = false
+    @Published private(set) var evidenceCaptureInProgress = false
     @Published var instruction = "Move slowly around the room, keeping walls and openings in view."
     @Published private(set) var captureView: RoomCaptureView
     @Published private(set) var liveMap = LiveMapSnapshot()
@@ -190,6 +191,8 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                 let entry = try self.save(room)
                 if let id = self.inspectionRoomID {
                     self.inspectionRooms.append((id: id, saved: entry))
+                    self.savedFloorMap.add(room, name: entry.name, roomID: id.uuidString.lowercased())
+                    self.liveMap = self.savedFloorMap
                     await self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
                     self.inspectionRoomID = nil
                 }
@@ -221,7 +224,25 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     }
 
     func captureInspectionEvidence() async {
-        await inspection.takeEvidence(captureView.captureSession.arSession.currentFrame?.capturedImage)
+        guard !evidenceCaptureInProgress else { return }
+        evidenceCaptureInProgress = true
+        defer { evidenceCaptureInProgress = false }
+        guard let request = inspection.request else { return }
+        guard let frame = captureView.captureSession.arSession.currentFrame,
+              ProcessInfo.processInfo.systemUptime - frame.timestamp < 2 else {
+            inspection.status = "Kamerabildet er utilgjengelig. Prøv igjen."
+            return
+        }
+        if case .normal = frame.camera.trackingState {
+            let transform = frame.camera.transform
+            let position = LiveMapPoint(Double(transform.columns.3.x), Double(transform.columns.3.z))
+            let matches = liveMap.rooms.filter { $0.contains(position) }
+            guard matches.count != 1 || matches[0].id.lowercased() == request.roomId.lowercased() else {
+                inspection.status = "Gå til det forespurte rommet før du tar bildet."
+                return
+            }
+        }
+        await inspection.takeEvidence(frame.capturedImage)
     }
 
     func finishInspection() async {

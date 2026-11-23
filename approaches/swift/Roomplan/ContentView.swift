@@ -1,3 +1,4 @@
+import ARKit
 import GoogleSignIn
 import RoomPlan
 import SwiftUI
@@ -6,6 +7,7 @@ import WebKit
 struct ContentView: View {
     @StateObject private var store = CaptureStore()
     @StateObject private var annotations = RoomAnnotationClient.shared
+    @State private var showingEvidenceCamera = false
     @StateObject private var inspection: InspectionGuide
 
     init() {
@@ -34,6 +36,7 @@ struct ContentView: View {
                                     if let roomName = request.roomName { Text(roomName).font(.caption.weight(.semibold)) }
                                     Text(request.prompt).font(.headline)
                                     Button("Ta bilde") { Task { await store.captureInspectionEvidence() } }
+                                        .disabled(store.evidenceCaptureInProgress)
                                         .buttonStyle(.borderedProminent).controlSize(.large)
                                 }
                                 if inspection.link != nil { Text(inspection.status).font(.caption) }
@@ -75,6 +78,8 @@ struct ContentView: View {
                                 if let request = inspection.request {
                                     if let roomName = request.roomName { Text(roomName).font(.caption) }
                                     Text(request.prompt)
+                                    Button("Ta bilde") { showingEvidenceCamera = true }
+                                        .disabled(store.processing || inspection.busy)
                                 }
                                 if inspection.link != nil {
                                     Button("Send befaring til jobbkortet") { Task { await store.finishInspection() } }
@@ -138,6 +143,29 @@ struct ContentView: View {
             .alert("RoomPlan", isPresented: Binding(get: { store.message != nil }, set: { if !$0 { store.message = nil } })) {
                 Button("OK", role: .cancel) { store.message = nil }
             } message: { Text(store.message ?? "") }
+        }
+        .fullScreenCover(isPresented: $showingEvidenceCamera) {
+            ZStack(alignment: .bottom) {
+                EvidenceCamera(session: store.captureView.captureSession.arSession).ignoresSafeArea()
+                VStack(spacing: 12) {
+                    if let request = inspection.request {
+                        if let name = request.roomName { Text(name).font(.caption.weight(.semibold)) }
+                        Text(request.prompt).font(.headline)
+                        Button("Ta bilde") {
+                            Task {
+                                await store.captureInspectionEvidence()
+                                if inspection.request == nil { showingEvidenceCamera = false }
+                            }
+                        }.disabled(store.evidenceCaptureInProgress)
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                    }
+                    Text(inspection.status).font(.caption)
+                    Button("Lukk") { showingEvidenceCamera = false }
+                }
+                .padding().frame(maxWidth: .infinity)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .padding()
+            }
         }
         .task { await annotations.restore() }
         .onOpenURL { url in
@@ -350,4 +378,14 @@ struct SVGPreview: UIViewRepresentable {
     let svg: String
     func makeUIView(context: Context) -> WKWebView { WKWebView() }
     func updateUIView(_ view: WKWebView, context: Context) { view.loadHTMLString(svg, baseURL: nil) }
+}
+
+struct EvidenceCamera: UIViewRepresentable {
+    let session: ARSession
+    func makeUIView(context: Context) -> ARSCNView {
+        let view = ARSCNView(frame: .zero)
+        view.session = session
+        return view
+    }
+    func updateUIView(_ view: ARSCNView, context: Context) {}
 }
