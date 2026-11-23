@@ -1,6 +1,7 @@
 """Coordinate evidence requests and background inspection review."""
 
 import asyncio
+import base64
 import json
 import logging
 import math
@@ -32,16 +33,29 @@ def room_id(value):
 class InspectionCoordinator:
     def __init__(self, *, base_url: str, token: str, session_id: str, work: str,
                  participant_identity: str, publish: Callable[[dict], Awaitable[None]],
-                 speak: Callable[[dict], None], transport=None, lag_seconds=6):
+                 speak: Callable[[dict], None], transport=None, lag_seconds=6,
+                 update_context: Callable[[dict, str | None], Awaitable[None]] | None = None,
+                 answer: Callable[[str], None] | None = None):
         if work not in ("male", "slipe"):
             raise ValueError("Invalid inspection work")
-        self.url = f"{base_url.rstrip('/')}/api/livekit/session/{session_id}/inspection/review"
+        self.base_url = f"{base_url.rstrip('/')}/api/livekit/session/{session_id}/inspection"
+        self.url = self.base_url + "/review"
         self.headers = {"Authorization": f"Bearer {token}"}
         self.work = work
         self.participant_identity = participant_identity
         self.publish = publish
         self.speak = speak
         self.transport = transport
+        self.update_context = update_context
+        self.answer = answer
+        self.location = None
+        self.location_received = 0.0
+        self.location_timestamp = 0.0
+        self.map_timestamp = 0.0
+        self.map_generation = 0
+        self.latest_spatial_image = None
+        self.context_tasks = set()
+        self.question_task = None
         self.lag_seconds = lag_seconds
         self.started_at = None
         self.rooms = {}
@@ -81,9 +95,165 @@ class InspectionCoordinator:
             # A room belongs to the instant it started, not its finish event.
             if phase == "start":
                 existing["seconds"] = seconds
-        self.current_room = ident
+        if self.location is None:
+            self.current_room = ident
         if phase == "finish":
             self.schedule_review()
+
+
+    def _spawn_context(self, coroutine):
+        task = asyncio.create_task(coroutine)
+        self.context_tasks.add(task)
+        task.add_done_callback(self.context_tasks.discard)
+        return task
+
+    @staticmethod
+    def _timestamp(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if not math.isfinite(value) or value <= 0 or value > time.time() * 1000 + 5000:
+            return None
+        return float(value)
+
+    def location_packet(self, data: bytes, identity: str | None):
+        if self.closed or identity != self.participant_identity:
+            return
+        try:
+            item = json.loads(data)
+            captured_at = self._timestamp(item["capturedAt"])
+            tracking = item["tracking"]
+            if captured_at is None or captured_at <= self.location_timestamp or tracking not in ("tracked", "uncertain", "unavailable"):
+                return
+            ident = room_id(item.get("roomId"))
+            name = item.get("roomName")
+            if tracking == "tracked" and ident:
+                if ident not in self.rooms or not isinstance(name, str) or not name.strip() or len(name) > 80:
+                    return
+                location = {"capturedAt": captured_at, "tracking": tracking, "roomId": ident,
+                            "roomName": name.strip()}
+            else:
+                location = {"capturedAt": captured_at, "tracking": tracking}
+            for field in ("position", "forward"):
+                point = item.get(field)
+                if point is not None:
+                    if not isinstance(point, dict) or set(point) != {"x", "y"}:
+                        return
+                    if any(isinstance(point[k], bool) or not isinstance(point[k], (int, float))
+                           or not math.isfinite(point[k]) or abs(point[k]) > 100000 for k in ("x", "y")):
+                        return
+                    location[field] = point
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            return
+        self.location = location
+        self.location_timestamp = captured_at
+        self.location_received = time.time()
+        self.current_room = location.get("roomId")
+        if self.update_context and self._room_changed(location):
+            self._spawn_context(self._update_location_context(location))
+
+    def _room_changed(self, location):
+        state = (location.get("tracking"), location.get("roomId"))
+        if getattr(self, "_last_context_room", None) == state:
+            return False
+        self._last_context_room = state
+        return True
+
+    async def _update_location_context(self, location):
+        try:
+            await self.update_context(location, None)
+        except Exception:
+            logger.warning("Unable to update live room context")
+
+    def current_location(self):
+        if self.location is None:
+            return {"tracking": "unavailable", "message": "Romposisjon er ikke mottatt ennå."}
+        if time.time() - self.location_received > 20 or time.time() * 1000 - self.location_timestamp > 20000:
+            return {"tracking": "uncertain", "message": "Romposisjonen er ikke oppdatert, spør personen hvor de er."}
+        if self.location["tracking"] != "tracked" or not self.location.get("roomId"):
+            tracking = self.location["tracking"] if self.location["tracking"] != "tracked" else "uncertain"
+            return {"tracking": tracking, "message": "Rommet er usikkert. Spør personen hvor de er."}
+        return self.location
+
+    def spatial_packet(self, data: bytes, identity: str | None):
+        if self.closed or identity != self.participant_identity:
+            return
+        try:
+            timestamp = self._timestamp(json.loads(data)["capturedAt"])
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            return
+        if timestamp is None or timestamp <= self.map_timestamp:
+            return
+        self.map_generation += 1
+        self._spawn_context(self._fetch_spatial(timestamp, self.map_generation))
+
+    async def _fetch_spatial(self, requested_at, generation):
+        try:
+            async with httpx.AsyncClient(transport=self.transport, timeout=15) as client:
+                response = await client.get(self.base_url + "/spatial", headers=self.headers)
+                response.raise_for_status()
+                snapshot = response.json()
+            timestamp = self._timestamp(snapshot["capturedAt"])
+            encoded = snapshot["image"]
+            if (timestamp is None or timestamp < requested_at or timestamp <= self.map_timestamp
+                    or not isinstance(encoded, str) or len(encoded) > 420000):
+                return
+            raw = base64.b64decode(encoded, validate=True)
+            if not (4 <= len(raw) <= 315000 and raw[:2] == b"\xff\xd8" and raw[-2:] == b"\xff\xd9"):
+                return
+            if self.closed or generation != self.map_generation:
+                return
+            self.map_timestamp = timestamp
+            self.latest_spatial_image = encoded
+            if self.update_context:
+                # The newest device location may be more recent than the map.
+                await self.update_context(self.current_location(), encoded)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            logger.warning("Could not retrieve the latest spatial map")
+        except Exception:
+            logger.warning("Unable to update live map context")
+
+    def ask_hydrogen(self, question: str):
+        if self.closed or not isinstance(question, str) or not question.strip() or len(question) > 500:
+            return False
+        if self.question_task and not self.question_task.done():
+            return False
+        if not self.rooms:
+            return False
+        self.question_task = asyncio.create_task(self._ask_hydrogen(question.strip()))
+        return True
+
+    async def _ask_hydrogen(self, question: str):
+        payload = {"work": self.work, "rooms": list(self.rooms.values()),
+                   "evidence": list(self.evidence), "question": question}
+        location = self.current_location()
+        if location.get("roomId"):
+            payload["currentRoomId"] = location["roomId"]
+            payload["currentLocation"] = location
+        if self.started_at is not None:
+            end = min(86400, max(0, time.time() - self.started_at - self.lag_seconds))
+            if end > 0:
+                payload["endSeconds"] = end
+        try:
+            async with httpx.AsyncClient(transport=self.transport, timeout=300) as client:
+                response = await client.post(self.base_url + "/question", headers=self.headers, json=payload)
+                response.raise_for_status()
+                result = response.json()
+            if not isinstance(result, dict) or not isinstance(result.get("summary"), str) or not isinstance(result.get("requests"), list):
+                raise ValueError("Invalid answer")
+            for item in result["requests"][:5]:
+                if not isinstance(item, dict):
+                    continue
+                request = await self.request_evidence(item.get("roomId"), item.get("target"), item.get("prompt"))
+                if request:
+                    self.speak(request)
+                    break
+            if self.answer and not self.closed:
+                self.answer(result["summary"][:2500])
+        except asyncio.CancelledError:
+            raise
+        except (httpx.HTTPError, ValueError, TypeError):
+            if self.answer and not self.closed:
+                self.answer("Hydrogen kunne ikke besvare spørsmålet nå. Prøv igjen.")
 
     def evidence_packet(self, data: bytes, identity: str | None):
         if self.closed or identity != self.participant_identity:
@@ -169,6 +339,11 @@ class InspectionCoordinator:
 
     async def close(self):
         self.closed = True
+        tasks = list(self.context_tasks)
         if self.review_task:
-            self.review_task.cancel()
-            await asyncio.gather(self.review_task, return_exceptions=True)
+            tasks.append(self.review_task)
+        if self.question_task:
+            tasks.append(self.question_task)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

@@ -66,6 +66,26 @@ private struct GuideSession: Decodable {
 
 private struct Recording: Decodable { let startedAt: Double? }
 
+struct SpatialLocation: Codable, Equatable {
+    var capturedAt: Int64
+    var tracking: String
+    var roomId: String?
+    var roomName: String?
+    var position: LiveMapPoint?
+    var forward: LiveMapPoint?
+}
+
+private struct SpatialSnapshot: Encodable {
+    let capturedAt: Int64
+    let seconds: Double
+    let location: SpatialLocation
+    let walls: [LiveMapLine]
+    let doors: [LiveMapLine]
+    let windows: [LiveMapLine]
+    let rooms: [SpatialRoom]
+    let image: String
+}
+
 private final class InspectionRedirectDelegate: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
@@ -95,6 +115,12 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     @Published var finalSummary = ""
     private var roomTimes: [(id: String, name: String, seconds: Double)] = []
     private var startTimeByRoom: [String: Double] = [:]
+    private var latestLocation: SpatialLocation?
+    private var lastLocationSent: Int64 = 0
+    private var lastSnapshotSent: Int64 = 0
+    private var locationSending = false
+    private var pendingLocation: SpatialLocation?
+    private var snapshotSending = false
     private let imageContext = CIContext()
     private let redirectDelegate = InspectionRedirectDelegate()
     private lazy var httpSession = URLSession(configuration: .ephemeral, delegate: redirectDelegate, delegateQueue: nil)
@@ -129,6 +155,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         evidence = []
         request = nil
         finalSummary = ""
+        latestLocation = nil
+        pendingLocation = nil
+        lastLocationSent = 0
+        lastSnapshotSent = 0
         status = "Kobler til veilederen …"
         busy = true
         defer { busy = false }
@@ -177,12 +207,12 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
-    private func cloudRequest(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+    private func cloudRequest(_ path: String, method: String = "GET", body: Data? = nil, timeout: TimeInterval = 900) async throws -> Data {
         guard let user = GIDSignIn.sharedInstance.currentUser else { throw URLError(.userAuthenticationRequired) }
         let refreshed = try await user.refreshTokensIfNeeded()
         guard let token = refreshed.idToken?.tokenString,
               let url = URL(string: path, relativeTo: cloudOrigin) else { throw URLError(.userAuthenticationRequired) }
-        var request = URLRequest(url: url, timeoutInterval: 900)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -235,11 +265,92 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         try? await room.localParticipant.publish(data: data, options: DataPublishOptions(topic: topic, reliable: true))
     }
 
+    func updateSpatial(snapshot: LiveMapSnapshot, pose: LiveCameraPose?, tracking: String) {
+        guard link != nil, session != nil, connected else { return }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let matches = pose.map { position in snapshot.rooms.filter { $0.contains(position.position) } } ?? []
+        let currentRoom = tracking == "tracked" && matches.count == 1 ? matches.first : nil
+        let location = SpatialLocation(
+            capturedAt: now, tracking: tracking,
+            roomId: currentRoom?.id, roomName: currentRoom?.name,
+            position: tracking == "tracked" ? pose?.position : nil,
+            forward: tracking == "tracked" ? pose?.forward : nil
+        )
+        let changed = latestLocation?.tracking != location.tracking || latestLocation?.roomId != location.roomId
+        latestLocation = location
+        if changed || now - lastLocationSent >= 2_000 {
+            pendingLocation = location
+            sendPendingLocation()
+        }
+        guard now - lastSnapshotSent >= 15_000, !snapshotSending,
+              let session, let startTime else { return }
+        let renderer = ImageRenderer(content:
+            LiveRoomMap(snapshot: snapshot, camera: pose)
+                .frame(width: 420, height: 420)
+                .background(Color(red: 0.06, green: 0.13, blue: 0.11))
+        )
+        renderer.scale = 1
+        guard let image = renderer.uiImage?.jpegData(compressionQuality: 0.65),
+              image.count <= 250_000 else { return }
+        let data = SpatialSnapshot(
+            capturedAt: now, seconds: max(0, (Double(now) - startTime) / 1000), location: location,
+            walls: snapshot.walls, doors: snapshot.doors, windows: snapshot.windows,
+            rooms: snapshot.rooms, image: image.base64EncodedString()
+        )
+        guard let body = try? JSONEncoder().encode(data) else { return }
+        snapshotSending = true
+        lastSnapshotSent = now
+        Task { [weak self] in
+            guard let self else { return }
+            defer { snapshotSending = false }
+            do {
+                _ = try await cloudRequest("/api/livekit/session/\(session.sessionId)/inspection/spatial", method: "PUT", body: body, timeout: 12)
+                guard self.session?.sessionId == session.sessionId else { return }
+                await send(["capturedAt": now], topic: "floorplan.inspection.spatial")
+            } catch {
+                // The next snapshot will retry using the newest map and pose.
+            }
+        }
+    }
+
+    private func sendPendingLocation() {
+        guard !locationSending, pendingLocation != nil else { return }
+        locationSending = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { locationSending = false }
+            while let location = pendingLocation, let room, connected {
+                pendingLocation = nil
+                do {
+                    let data = try JSONEncoder().encode(location)
+                    try await room.localParticipant.publish(data: data, options: DataPublishOptions(topic: "floorplan.inspection.location", reliable: true))
+                    lastLocationSent = location.capturedAt
+                } catch {
+                    // The tracking loop will send the latest location on its next pass.
+                    lastLocationSent = 0
+                    return
+                }
+            }
+        }
+    }
+
     nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
         Task { @MainActor [weak self] in
             guard let self else { return }
             if let startTime { await send(["startedAt": startTime], topic: "floorplan.recording") }
             if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
+            if let latestLocation {
+                pendingLocation = latestLocation
+                sendPendingLocation()
+            }
+        }
+    }
+
+    nonisolated func roomDidReconnect(_ room: Room) {
+        Task { @MainActor [weak self] in
+            guard let self, let latestLocation else { return }
+            pendingLocation = latestLocation
+            sendPendingLocation()
         }
     }
 
@@ -320,5 +431,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         connected = false
         publishing = false
         published = false
+        latestLocation = nil
+        pendingLocation = nil
+        lastLocationSent = 0
+        lastSnapshotSent = 0
     }
 }

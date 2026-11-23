@@ -62,16 +62,19 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         savedFloorMap = LiveMapSnapshot()
         for entry in rooms where entry.sessionID == sessionID {
             if let room = try? capturedRoom(entry) {
-                savedFloorMap.add(room, name: entry.name)
+                let id = inspectionRooms.first { $0.saved.id == entry.id }?.id.uuidString.lowercased()
+                savedFloorMap.add(room, name: entry.name, roomID: id)
             }
         }
         liveMap = savedFloorMap
         cameraPose = nil
         scanning = true
         captureView.captureSession.run(configuration: RoomCaptureSession.Configuration())
+        trackingTask?.cancel()
         trackingTask = Task {
-            while !Task.isCancelled && scanning {
-                if let frame = captureView.captureSession.arSession.currentFrame {
+            while !Task.isCancelled && (scanning || inspection.link != nil) {
+                if let frame = captureView.captureSession.arSession.currentFrame,
+                   ProcessInfo.processInfo.systemUptime - frame.timestamp < 2 {
                     switch frame.camera.trackingState {
                     case .limited(.relocalizing):
                         instruction = "Tracking is relocalizing. Return to a previously scanned area and move slowly."
@@ -89,10 +92,22 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                             forward: LiveMapPoint(-Double(transform.columns.2.x), -Double(transform.columns.2.z))
                         )
                     }
-                    if inspection.link != nil { inspection.capture(frame.capturedImage) }
-                    if RoomAnnotationClient.shared.signedIn {
+                    if inspection.link != nil {
+                        inspection.capture(frame.capturedImage)
+                        let tracking: String
+                        switch frame.camera.trackingState {
+                        case .normal: tracking = "tracked"
+                        case .limited: tracking = "uncertain"
+                        case .notAvailable: tracking = "unavailable"
+                        }
+                        inspection.updateSpatial(snapshot: liveMap, pose: cameraPose, tracking: tracking)
+                    }
+                    if scanning && RoomAnnotationClient.shared.signedIn {
                         frameSampler.sample(frame.capturedImage)
                     }
+                } else if inspection.link != nil {
+                    cameraPose = nil
+                    inspection.updateSpatial(snapshot: liveMap, pose: nil, tracking: "unavailable")
                 }
                 try? await Task.sleep(for: .milliseconds(200))
             }
@@ -103,12 +118,16 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         guard scanning, !stopping else { return }
         stopping = true
         processing = true
+        if inspection.link != nil {
+            cameraPose = nil
+            inspection.updateSpatial(snapshot: liveMap, pose: nil, tracking: "unavailable")
+        }
         captureView.captureSession.stop(pauseARSession: false)
     }
 
     nonisolated func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
         let sessionIdentity = ObjectIdentifier(session)
-        let snapshot = LiveMapSnapshot(room)
+        let snapshot = LiveMapSnapshot(room, roomID: room.identifier.uuidString, name: "Room")
         Task { @MainActor [weak self] in
             guard let self, self.scanning,
                   ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
@@ -116,6 +135,20 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             combined.walls.append(contentsOf: snapshot.walls)
             combined.doors.append(contentsOf: snapshot.doors)
             combined.windows.append(contentsOf: snapshot.windows)
+            if let id = self.inspectionRoomID {
+                let activeRooms = snapshot.rooms.map {
+                    SpatialRoom(id: id.uuidString.lowercased(), name: "Rom \(self.inspectionRooms.count + 1)", polygon: $0.polygon)
+                }
+                combined.rooms.append(contentsOf: activeRooms)
+                for room in activeRooms {
+                    let count = Double(room.polygon.count)
+                    combined.labels.append(LiveMapRoom(
+                        id: room.id, label: room.name,
+                        position: LiveMapPoint(room.polygon.map(\.x).reduce(0, +) / count,
+                                               room.polygon.map(\.y).reduce(0, +) / count)
+                    ))
+                }
+            }
             self.liveMap = combined
         }
     }
@@ -143,7 +176,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         Task { @MainActor [weak self] in
             guard let self, ObjectIdentifier(self.captureView.captureSession) == sessionIdentity else { return }
             self.scanning = false
-            self.trackingTask?.cancel()
+            if self.inspection.link == nil { self.trackingTask?.cancel() }
             let frames = self.frameSampler.frames
             self.frameSampler.reset()
             if let errorDescription {
@@ -250,6 +283,18 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             updated.name = annotation.name
             try JSONEncoder().encode(updated).write(to: directory.appending(path: "info.json"), options: .atomic)
             rooms[index] = updated
+            if let id = inspectionRooms.first(where: { $0.saved.id == entry.id })?.id.uuidString.lowercased() {
+                func rename(_ map: inout LiveMapSnapshot) {
+                    map.rooms = map.rooms.map {
+                        $0.id == id ? SpatialRoom(id: id, name: annotation.name, polygon: $0.polygon) : $0
+                    }
+                    map.labels = map.labels.map {
+                        $0.id == id ? LiveMapRoom(id: id, label: annotation.name, position: $0.position) : $0
+                    }
+                }
+                rename(&savedFloorMap)
+                rename(&liveMap)
+            }
         } catch {
             message = "Rommet er lagret, men rapporten kunne ikke lages: \(error.localizedDescription)"
         }

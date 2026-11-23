@@ -4,6 +4,15 @@ import XCTest
 @testable import Roomplan
 
 final class GeometryTests: XCTestCase {
+  func testRoomContainmentExcludesEdgesAndOutside() {
+    let room = SpatialRoom(id: "room", name: "Bad", polygon: [
+      LiveMapPoint(0, 0), LiveMapPoint(4, 0), LiveMapPoint(4, 3), LiveMapPoint(0, 3),
+    ])
+    XCTAssertTrue(room.contains(LiveMapPoint(2, 2)))
+    XCTAssertFalse(room.contains(LiveMapPoint(4.2, 1)))
+    XCTAssertFalse(room.contains(LiveMapPoint(3.98, 1)))
+    XCTAssertFalse(room.contains(LiveMapPoint(4, 1)))
+  }
   func testAnnotationChangesOnlyRoomNameAndType() throws {
     let fixture = try XCTUnwrap(
       Bundle(for: Self.self).url(forResource: "rotated-l", withExtension: "json"))

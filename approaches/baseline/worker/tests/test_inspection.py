@@ -76,3 +76,119 @@ async def test_finished_room_reviews_video_once_and_publishes_result():
     assert spoken[0]["roomName"] == "Bad"
     assert spoken[0]["prompt"] == TARGETS["ventilation"]
     await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_live_location_expires_and_ignores_untrusted_or_older_packets():
+    context = []
+    room = str(uuid.uuid4())
+    async def update(location, image):
+        context.append((location, image))
+    async def publish(_):
+        pass
+    coordinator = InspectionCoordinator(
+        base_url="http://test", token="token", session_id="session", work="male",
+        participant_identity="operator", publish=publish, speak=lambda _: None,
+        update_context=update,
+    )
+    coordinator.room_packet(json.dumps({
+        "roomId": room, "name": "Bad", "seconds": 0, "phase": "start",
+    }).encode(), "operator")
+    now = time.time() * 1000
+    location = {"capturedAt": now, "tracking": "tracked", "roomId": room,
+                "roomName": "Bad", "position": {"x": 1, "y": 2},
+                "forward": {"x": 0, "y": -1}}
+    coordinator.location_packet(json.dumps(location).encode(), "other")
+    assert coordinator.current_location()["tracking"] == "unavailable"
+    coordinator.location_packet(json.dumps(location).encode(), "operator")
+    await asyncio.sleep(0)
+    assert coordinator.current_location()["roomId"] == room
+    assert context[-1][0]["forward"] == {"x": 0, "y": -1}
+    coordinator.location_packet(json.dumps(location | {
+        "capturedAt": now - 1, "tracking": "unavailable",
+    }).encode(), "operator")
+    assert coordinator.current_location()["roomId"] == room
+    coordinator.location_received -= 21
+    assert coordinator.current_location()["tracking"] == "uncertain"
+    coordinator.location_packet(json.dumps({
+        "capturedAt": now + 1, "tracking": "unavailable",
+    }).encode(), "operator")
+    assert coordinator.current_location()["tracking"] == "unavailable"
+    assert "roomId" not in coordinator.current_location()
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_spatial_map_is_fetched_with_room_capability_and_sent_with_latest_position():
+    import base64
+
+    room = str(uuid.uuid4())
+    timestamp = int(time.time() * 1000)
+    image = base64.b64encode(b"\xff\xd8test\xff\xd9").decode()
+    published = []
+    calls = []
+    async def update(location, jpeg):
+        published.append((location, jpeg))
+    async def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"capturedAt": timestamp, "image": image})
+    async def publish(_):
+        pass
+    coordinator = InspectionCoordinator(
+        base_url="http://test", token="scoped-token", session_id="session", work="male",
+        participant_identity="operator", publish=publish, speak=lambda _: None,
+        transport=httpx.MockTransport(handler), update_context=update,
+    )
+    coordinator.room_packet(json.dumps({
+        "roomId": room, "name": "Bad", "seconds": 0, "phase": "start",
+    }).encode(), "operator")
+    coordinator.location_packet(json.dumps({
+        "capturedAt": timestamp, "tracking": "tracked", "roomId": room, "roomName": "Bad",
+    }).encode(), "operator")
+    coordinator.spatial_packet(json.dumps({"capturedAt": timestamp}).encode(), "other")
+    assert not calls
+    coordinator.spatial_packet(json.dumps({"capturedAt": timestamp}).encode(), "operator")
+    await asyncio.gather(*list(coordinator.context_tasks))
+    assert calls[0].headers["authorization"] == "Bearer scoped-token"
+    assert calls[0].url.path.endswith("/inspection/spatial")
+    assert published[-1] == (coordinator.current_location(), image)
+    coordinator.spatial_packet(json.dumps({"capturedAt": timestamp}).encode(), "operator")
+    assert len(calls) == 1
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_live_question_is_backgrounded_and_includes_latest_pointing_direction():
+    room = str(uuid.uuid4())
+    now = time.time() * 1000
+    received = []
+    answers = []
+    release = asyncio.Event()
+    async def handler(request):
+        received.append(json.loads(request.content))
+        await release.wait()
+        return httpx.Response(200, json={"summary": "Vasken til høyre.", "requests": []})
+    async def publish(_):
+        pass
+    coordinator = InspectionCoordinator(
+        base_url="http://test", token="token", session_id="session", work="male",
+        participant_identity="operator", publish=publish, speak=lambda _: None,
+        answer=answers.append, transport=httpx.MockTransport(handler),
+    )
+    coordinator.room_packet(json.dumps({
+        "roomId": room, "name": "Bad", "seconds": 0, "phase": "start",
+    }).encode(), "operator")
+    coordinator.location_packet(json.dumps({
+        "capturedAt": now, "tracking": "tracked", "roomId": room, "roomName": "Bad",
+        "position": {"x": 1, "y": 2}, "forward": {"x": 0, "y": -1},
+    }).encode(), "operator")
+    coordinator.recording_started(time.time() - 20)
+    assert coordinator.ask_hydrogen("Hvilken vask er det?")
+    assert not coordinator.ask_hydrogen("Et ekstra spørsmål")
+    await asyncio.sleep(0)
+    assert received[0]["currentLocation"]["forward"] == {"x": 0, "y": -1}
+    assert received[0]["currentRoomId"] == room
+    release.set()
+    await asyncio.wait_for(coordinator.question_task, 1)
+    assert answers == ["Vasken til høyre."]
+    await coordinator.close()

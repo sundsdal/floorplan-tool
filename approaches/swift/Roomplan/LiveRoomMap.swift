@@ -2,7 +2,7 @@ import RoomPlan
 import SwiftUI
 import simd
 
-struct LiveMapPoint: Sendable {
+struct LiveMapPoint: Codable, Sendable, Equatable {
     let x: Double
     let y: Double
 
@@ -12,7 +12,7 @@ struct LiveMapPoint: Sendable {
     }
 }
 
-struct LiveMapLine: Identifiable, Sendable {
+struct LiveMapLine: Codable, Identifiable, Sendable {
     let id: String
     let start: LiveMapPoint
     let end: LiveMapPoint
@@ -24,15 +24,46 @@ struct LiveMapRoom: Identifiable, Sendable {
     let position: LiveMapPoint
 }
 
+struct SpatialRoom: Codable, Sendable {
+    let id: String
+    let name: String
+    let polygon: [LiveMapPoint]
+
+    func contains(_ point: LiveMapPoint) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var previous = polygon.count - 1
+        for index in polygon.indices {
+            let a = polygon[index]
+            let b = polygon[previous]
+            let dx = b.x - a.x
+            let dy = b.y - a.y
+            let lengthSquared = dx * dx + dy * dy
+            if lengthSquared > 0 {
+                let fraction = max(0, min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared))
+                let distance = hypot(point.x - (a.x + fraction * dx), point.y - (a.y + fraction * dy))
+                if distance < 0.05 { return false }
+            }
+            if (a.y > point.y) != (b.y > point.y),
+               point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+                inside.toggle()
+            }
+            previous = index
+        }
+        return inside
+    }
+}
+
 struct LiveMapSnapshot: Sendable {
     var walls: [LiveMapLine] = []
     var doors: [LiveMapLine] = []
     var windows: [LiveMapLine] = []
     var labels: [LiveMapRoom] = []
+    var rooms: [SpatialRoom] = []
 
     init() {}
 
-    init(_ room: CapturedRoom) {
+    init(_ room: CapturedRoom, roomID: String? = nil, name: String? = nil) {
         func lines(_ surfaces: [CapturedRoom.Surface]) -> [LiveMapLine] {
             surfaces.compactMap { surface in
                 let halfWidth = surface.dimensions.x / 2
@@ -50,17 +81,29 @@ struct LiveMapSnapshot: Sendable {
         walls = lines(room.walls)
         doors = lines(room.doors + room.openings)
         windows = lines(room.windows)
+        if let roomID, let name {
+            let floors = room.floors.map { floor in
+                floor.polygonCorners.map { corner in
+                    let point = floor.transform * SIMD4<Float>(corner.x, corner.y, corner.z, 1)
+                    return LiveMapPoint(Double(point.x), Double(point.z))
+                }
+            }.filter { $0.count >= 3 && $0.allSatisfy { $0.x.isFinite && $0.y.isFinite } }
+            if let polygon = floors.max(by: { area($0) < area($1) }), area(polygon) > 0.001 {
+                rooms = [SpatialRoom(id: roomID.lowercased(), name: name, polygon: polygon)]
+            }
+        }
     }
 
-    mutating func add(_ room: CapturedRoom, name: String) {
-        let snapshot = LiveMapSnapshot(room)
+    mutating func add(_ room: CapturedRoom, name: String, roomID: String? = nil) {
+        let snapshot = LiveMapSnapshot(room, roomID: roomID ?? room.identifier.uuidString, name: name)
         walls.append(contentsOf: snapshot.walls)
         doors.append(contentsOf: snapshot.doors)
         windows.append(contentsOf: snapshot.windows)
+        rooms.append(contentsOf: snapshot.rooms)
         let points = snapshot.walls.flatMap { [$0.start, $0.end] }
         if !points.isEmpty {
             labels.append(LiveMapRoom(
-                id: room.identifier.uuidString,
+                id: (roomID ?? room.identifier.uuidString).lowercased(),
                 label: name,
                 position: LiveMapPoint(
                     points.map(\.x).reduce(0, +) / Double(points.count),
@@ -69,6 +112,13 @@ struct LiveMapSnapshot: Sendable {
             ))
         }
     }
+}
+
+private func area(_ points: [LiveMapPoint]) -> Double {
+    abs(points.indices.reduce(0.0) { sum, index in
+        let next = points[(index + 1) % points.count]
+        return sum + points[index].x * next.y - next.x * points[index].y
+    }) / 2
 }
 
 struct LiveCameraPose: Sendable {
