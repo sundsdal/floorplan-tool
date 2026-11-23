@@ -19,7 +19,7 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if store.scanning {
+                if store.scanning || store.transitioningRooms {
                     ZStack(alignment: .bottom) {
                         CaptureCamera(view: store.captureView).ignoresSafeArea(edges: .bottom)
                         VStack {
@@ -41,7 +41,7 @@ struct ContentView: View {
                                 }
                                 if inspection.link != nil { Text(inspection.status).font(.caption) }
                                 Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
-                                Button(inspection.link == nil ? "Finish room" : "Avslutt skanning", action: store.finish)
+                                Button(inspection.link == nil ? "Finish room" : "Avslutt befaring", action: store.finishFromCamera)
                                     .buttonStyle(.borderedProminent).controlSize(.large)
                             }
                             .padding().frame(maxWidth: .infinity)

@@ -159,6 +159,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         link = pendingLink
         self.pendingLink = nil
         session = nil
+        publishedFinalRooms = false
         finalized = false
         startTime = nil
         activeRoom = nil
@@ -308,6 +309,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "X-Serverless-Authorization")
         if let session { request.setValue("Bearer \(session.sessionToken)", forHTTPHeaderField: "Authorization") }
         let (data, response) = try await httpSession.data(for: request)
+        if path.hasSuffix("/finalize"), (response as? HTTPURLResponse)?.statusCode == 425 {
+            throw InspectionSynchronizationError.waitingForVideo
+        }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         return data
     }
@@ -520,6 +524,21 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
+    private var publishedFinalRooms = false
+
+    private enum InspectionSynchronizationError: Error { case waitingForVideo }
+
+    private func finalizeRequest(path: String, body: Data) async throws -> Data {
+        for attempt in 0..<60 {
+            do { return try await cloudRequest(path, method: "POST", body: body) }
+            catch InspectionSynchronizationError.waitingForVideo where attempt < 59 {
+                status = "Venter på opptaket og dokumentasjonsbildene …"
+                try await Task.sleep(for: .seconds(3))
+            }
+        }
+        throw InspectionSynchronizationError.waitingForVideo
+    }
+
     func finalize() async throws {
         guard !finalized, let session, let link else { return }
         try await flushEvents()
@@ -528,7 +547,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             "rooms": roomTimes.map { ["roomId": $0.id, "name": $0.name, "seconds": $0.seconds] },
             "evidence": evidence.map { ["requestId": $0.requestId, "roomId": $0.roomId, "target": $0.target] }
         ])
-        let response = try await cloudRequest("/api/livekit/session/\(session.sessionId)/inspection/finalize", method: "POST", body: body)
+        let response = try await finalizeRequest(path: "/api/livekit/session/\(session.sessionId)/inspection/finalize", body: body)
         struct FinalRequest: Decodable { let roomId: String; let target: String }
         struct FinalResult: Decodable { let summary: String; let requests: [FinalRequest] }
         let result = try JSONDecoder().decode(FinalResult.self, from: response)
@@ -549,6 +568,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     }
 
     func publishRooms(_ rooms: [ScannedRoom]) async throws {
+        guard !publishedFinalRooms else { return }
         for room in rooms {
             let encoded = try JSONEncoder().encode(room.document)
             let document = try JSONSerialization.jsonObject(with: encoded)
@@ -557,6 +577,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             postEvent("room.upsert", roomID: room.roomId, data: data)
         }
         try await flushEvents()
+        publishedFinalRooms = true
     }
 
     func submit(rooms: [ScannedRoom]) async throws {

@@ -38,6 +38,8 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     private var segmentAnchor: LiveMapPoint?
     private var guideNamedRooms: [String: String] = [:]
     private var autoContinue = false
+    private var submitAfterCapture = false
+    var transitioningRooms: Bool { autoContinue && processing }
     private var segmentStarted = Date()
     private var doorSides: [String: Double] = [:]
     private var nextSegmentPosition: LiveMapPoint?
@@ -79,9 +81,6 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             let id = roomID.uuidString.lowercased()
             inspectionRoomName = guideNamedRooms[id] ?? match?.name ?? "Rom \(inspectionRooms.count + 1)"
             inspection.postEvent("room.upsert", roomID: id, data: ["name": inspectionRoomName])
-            do { try await inspection.flushEvents() } catch {
-                inspection.status = "Rommet synkroniseres når forbindelsen er tilbake."
-            }
             inspection.postEvent("room.visited", roomID: id, data: [:])
             inspection.announceRoom(id: id, name: inspectionRoomName, phase: "start")
             segmentStarted = .now
@@ -178,6 +177,12 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         }
     }
 
+    func finishFromCamera() {
+        guard scanning, !stopping else { return }
+        submitAfterCapture = inspection.link != nil
+        finish()
+    }
+
     func finish() {
         guard scanning, !stopping else { return }
         stopping = true
@@ -247,6 +252,8 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             let frames = self.frameSampler.frames
             self.frameSampler.reset()
             if let errorDescription {
+                self.submitAfterCapture = false
+                self.autoContinue = false
                 self.processing = false
                 self.message = "Scan ended: \(errorDescription). Previously saved rooms are still available."
                 return
@@ -285,9 +292,15 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                     self.annotationPending.insert(entry.id)
                     Task { await self.annotate(room, entry: entry, frames: frames) }
                 }
-            } catch { self.message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
+            } catch {
+                self.submitAfterCapture = false
+                self.autoContinue = false
+                self.message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
             self.processing = false
-            if self.autoContinue, self.inspection.link != nil {
+            if self.submitAfterCapture {
+                self.submitAfterCapture = false
+                await self.finishInspection()
+            } else if self.autoContinue, self.inspection.link != nil {
                 self.autoContinue = false
                 await self.start()
             }
@@ -425,16 +438,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             try JSONEncoder().encode(updated).write(to: directory.appending(path: "info.json"), options: .atomic)
             rooms[index] = updated
             if let id = inspectionID {
-                func rename(_ map: inout LiveMapSnapshot) {
-                    map.rooms = map.rooms.map {
-                        $0.id == id ? SpatialRoom(id: id, name: updated.name, polygon: $0.polygon) : $0
-                    }
-                    map.labels = map.labels.map {
-                        $0.id == id ? LiveMapRoom(id: id, label: updated.name, position: $0.position) : $0
-                    }
-                }
-                rename(&savedFloorMap)
-                rename(&liveMap)
+                updateMapName(id: id, name: updated.name)
                 var document = annotation.applying(to: RoomPlanConverter.convert(room))
                 if !document.floorplan.rooms.isEmpty {
                     document.floorplan.rooms[0].id = id
@@ -451,11 +455,21 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         }
     }
 
+    private func updateMapName(id: String, name: String) {
+        func rename(_ map: inout LiveMapSnapshot) {
+            map.rooms = map.rooms.map { $0.id.lowercased() == id ? SpatialRoom(id: $0.id, name: name, polygon: $0.polygon) : $0 }
+            map.labels = map.labels.map { $0.id.lowercased() == id ? LiveMapRoom(id: $0.id, label: name, position: $0.position) : $0 }
+        }
+        rename(&savedFloorMap)
+        rename(&liveMap)
+    }
+
     private func renameInspectionRoom(id: String, name: String) {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let normalized = id.lowercased()
         guideNamedRooms[normalized] = name
         if inspectionRoomID?.uuidString.lowercased() == normalized { inspectionRoomName = name }
+        updateMapName(id: normalized, name: name)
         guard
               let item = inspectionRooms.first(where: { $0.id.uuidString.lowercased() == id.lowercased() }),
               let index = rooms.firstIndex(where: { $0.id == item.saved.id }) else { return }
@@ -464,12 +478,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         do {
             try JSONEncoder().encode(updated).write(to: roomDirectory(updated).appending(path: "info.json"), options: .atomic)
             rooms[index] = updated
-            func rename(_ map: inout LiveMapSnapshot) {
-                map.rooms = map.rooms.map { $0.id.lowercased() == id.lowercased() ? SpatialRoom(id: $0.id, name: name, polygon: $0.polygon) : $0 }
-                map.labels = map.labels.map { $0.id.lowercased() == id.lowercased() ? LiveMapRoom(id: $0.id, label: name, position: $0.position) : $0 }
-            }
-            rename(&savedFloorMap)
-            rename(&liveMap)
+
         } catch { message = "Could not save room name: \(error.localizedDescription)" }
     }
 
