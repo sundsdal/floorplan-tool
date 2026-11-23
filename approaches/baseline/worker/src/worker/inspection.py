@@ -66,6 +66,116 @@ class InspectionCoordinator:
         self.review_task = None
         self.pending_review = False
         self.closed = False
+        self.event_cursor = 0
+        self.event_task = None
+        self.event_queue = asyncio.Queue()
+        self.events_loaded = False
+        self.named_rooms = set()
+        self.registered_rooms = set()
+        self.events_supported = None
+
+    def start_events(self):
+        if self.event_task is None:
+            self.event_task = asyncio.create_task(self._event_loop())
+
+    def emit_event(self, event_type, data, ident=None, captured_at=None):
+        event = {"id": str(uuid.uuid4()), "type": event_type, "data": data,
+                 "capturedAt": int(captured_at if captured_at is not None else time.time() * 1000)}
+        if ident:
+            event["roomId"] = ident
+        self.event_queue.put_nowait(event)
+
+    async def _event_loop(self):
+        # Retry with the same UUID so a response lost after commit cannot duplicate an event.
+        async with httpx.AsyncClient(transport=self.transport, timeout=15) as client:
+            while not self.closed:
+                try:
+                    while not self.event_queue.empty():
+                        event = self.event_queue._queue[0]
+                        response = await client.post(self.base_url + "/events", headers=self.headers, json=event)
+                        if response.status_code == 409:
+                            break  # Poll for the room registration, then retry the same event.
+                        if response.status_code != 404:
+                            response.raise_for_status()
+                        self.event_queue.get_nowait()
+                    response = await client.get(self.base_url + "/events", headers=self.headers,
+                                                params={"after": self.event_cursor})
+                    if response.status_code == 404:
+                        self.events_supported = False
+                    else:
+                        self.events_supported = True
+                        response.raise_for_status()
+                        page = response.json()
+                        if not isinstance(page.get("events"), list) or not isinstance(page.get("cursor"), int):
+                            raise ValueError("Invalid event page")
+                        for event in page["events"]:
+                            self._apply_event(event)
+                        self.event_cursor = page["cursor"]
+                        self.events_loaded = True
+                except asyncio.CancelledError:
+                    raise
+                except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                    logger.warning("Inspection event sync failed; retrying")
+                await asyncio.sleep(2)
+
+    def _apply_event(self, event):
+        if not isinstance(event, dict) or not isinstance(event.get("data"), dict):
+            return
+        kind, data = event.get("type"), event["data"]
+        ident = room_id(event.get("roomId"))
+        if kind in ("room.upsert", "room.named") and ident:
+            name = data.get("name")
+            if isinstance(name, str) and name.strip() and len(name) <= 80:
+                self.rooms.setdefault(ident, {"roomId": ident, "seconds": 0})["name"] = name.strip()
+                if kind == "room.upsert":
+                    self.registered_rooms.add(ident)
+                if kind == "room.named":
+                    self.named_rooms.add(ident)
+                if self.location is None:
+                    self.current_room = ident
+        elif kind == "evidence.requested" and ident:
+            request_id, target = data.get("requestId"), data.get("target")
+            if room_id(request_id) and target in TARGETS:
+                self.requests.setdefault(request_id, {"requestId": request_id, "roomId": ident,
+                    "roomName": self.rooms.get(ident, {}).get("name", ""), "target": target,
+                    "prompt": TARGETS[target]})
+        elif kind in ("evidence.saved", "evidence.retry"):
+            request_id = data.get("requestId")
+            request = self.requests.get(request_id)
+            if request and kind == "evidence.saved":
+                evidence = {"requestId": request_id, "roomId": request["roomId"], "target": request["target"]}
+                if evidence not in self.evidence:
+                    self.evidence.append(evidence)
+                    if self.events_loaded and self.answer:
+                        self.answer("Dokumentasjonen er lagret.")
+                    self.schedule_review()
+            elif request and kind == "evidence.retry":
+                self.evidence = [e for e in self.evidence if e["requestId"] != request_id]
+                if self.events_loaded and self.answer:
+                    self.answer("Dokumentasjonen kunne ikke lagres. Prøv å filme på nytt.")
+
+    def set_room_name(self, ident, name):
+        ident = room_id(ident)
+        if (self.event_task and self.events_supported is not False and ident not in self.registered_rooms):
+            return False
+        if ident not in self.rooms or not isinstance(name, str) or not name.strip() or len(name) > 80:
+            return False
+        name = name.strip()
+        self.rooms[ident]["name"] = name
+        self.named_rooms.add(ident)
+        self.emit_event("room.named", {"name": name, "source": "user"}, ident)
+        return True
+
+    def mark_evidence(self, request_id, start_seconds, end_seconds):
+        request = self.requests.get(request_id)
+        if (not request or self.started_at is None or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                or not math.isfinite(v) for v in (start_seconds, end_seconds))
+                or end_seconds - start_seconds > 15
+                or not 0 <= start_seconds < end_seconds <= min(86400, time.time() - self.started_at + 1)):
+            return False
+        self.emit_event("evidence.marked", {"requestId": request_id, "target": request["target"],
+                        "startSeconds": start_seconds, "endSeconds": end_seconds}, request["roomId"])
+        return True
 
     def recording_started(self, started_at):
         if self.closed or self.started_at is not None:
@@ -92,7 +202,8 @@ class InspectionCoordinator:
         if existing is None:
             self.rooms[ident] = {"roomId": ident, "name": name.strip(), "seconds": seconds}
         else:
-            existing["name"] = name.strip()
+            if ident not in self.named_rooms:
+                existing["name"] = name.strip()
             # A finish can arrive first, but repeated starts must not move the offset.
             if phase == "start" and ident not in self.room_starts:
                 existing["seconds"] = seconds
@@ -280,7 +391,9 @@ class InspectionCoordinator:
 
     async def request_evidence(self, ident: str, target: str, prompt: str):
         ident = room_id(ident)
-        if (self.closed or ident not in self.rooms or target not in TARGETS
+        if (self.closed or ident not in self.rooms
+                or (self.event_task and self.events_supported is not False and ident not in self.registered_rooms)
+                or target not in TARGETS
                 or not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 300):
             return False
         if any(not any(e["requestId"] == key for e in self.evidence)
@@ -298,6 +411,7 @@ class InspectionCoordinator:
             self.requests.pop(request["requestId"], None)
             logger.warning("Failed to publish inspection request")
             return False
+        self.emit_event("evidence.requested", {"requestId": request["requestId"], "target": target}, ident)
         return request
 
     def schedule_review(self):
@@ -350,6 +464,8 @@ class InspectionCoordinator:
             tasks.append(self.review_task)
         if self.question_task:
             tasks.append(self.question_task)
+        if self.event_task:
+            tasks.append(self.event_task)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

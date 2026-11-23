@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import time
 
 from livekit import rtc
 from livekit.agents import (
@@ -60,12 +61,15 @@ class Guide(Agent):
 class InspectionGuide(Agent):
     def __init__(self, inspection: InspectionCoordinator):
         super().__init__(instructions="""Du er en norsk assistent for befaring før malerarbeid.
-Snakk kort og naturlig. Følg kamerabildet og be om ett nyttig nærbilde om gangen
+Snakk kort og naturlig. Fortsett stille når personen beveger seg mellom rom; ikke avbryt bare fordi rommet endres. Følg kamerabildet og be om ett nyttig nærbilde om gangen
 når noe er synlig eller mangler for å forstå arbeidsstedet. Bruk verktøyet
 request_inspection_evidence for bildeforespørsler og bare rom-ID som systemet
 har gitt deg. Be brukeren filme eller ta bilde fra et trygt tilgjengelig sted.
 Ikke be noen åpne elektriske installasjoner, bryte opp materialer eller gå inn i sjakter.
 Ikke identifiser asbest eller materialinnhold ut fra bilder. Si fra ved usikkerhet.
+Når personen navngir et kjent rom, bruk set_room_name. Ved en rettelse, bruk rom-ID-en
+til rommet det forrige navnet gjaldt, selv om personen har beveget seg videre. Når ønsket dokumentasjon er filmet,
+bruk mark_evidence med opptakets tidsintervall og forespørselens ID. Ikke påstå at dokumentasjonen er lagret før bekreftelse.
 Bruk get_current_room for å svare på spørsmål om rommet, og hvis posisjonen er usikker, si det.
 Når brukeren stiller et spørsmål som krever grundigere gjennomgang av video, kart eller retning,
 bruk ask_hydrogen og si kort at du undersøker. Kartbilder viser gulvplan ovenfra med brukerens
@@ -88,6 +92,18 @@ før brukeren har bekreftet bildet.""")
             return "Forespørselen er vist på telefonen. Be brukeren ta bildet."
         return "Forespørselen kunne ikke vises, eller venter allerede på et bilde."
 
+
+    @function_tool()
+    async def set_room_name(self, room_id: str, name: str) -> str:
+        """Name a known room when the operator identifies it, using the system room UUID."""
+        return "Romnavnet er oppdatert." if self.inspection.set_room_name(room_id, name) else "Rommet eller navnet er ugyldig."
+
+    @function_tool()
+    async def mark_evidence(self, request_id: str, start_seconds: float, end_seconds: float) -> str:
+        """Mark the recorded interval for a requested view, measured in seconds since recording began."""
+        if self.inspection.mark_evidence(request_id, start_seconds, end_seconds):
+            return "Videointervallet er merket og venter på lagring."
+        return "Kunne ikke merke intervallet. Kontroller forespørselen og opptakstidene."
 
     @function_tool()
     async def get_current_room(self) -> str:
@@ -209,6 +225,25 @@ async def entrypoint(ctx: JobContext):
         update_context=update_spatial_context, answer=answer_hydrogen,
     )
     session_ready = False
+    if mode == "inspection":
+        inspection.start_events()
+
+        @session.on("conversation_item_added")
+        def on_conversation_item(event):
+            item = event.item
+            if getattr(item, "type", None) != "message" or getattr(item, "role", None) not in ("user", "assistant"):
+                return
+            text = getattr(item, "text_content", None)
+            if (not isinstance(text, str) or not text.strip()
+                    or text.startswith("Oppdatert posisjon fra RoomPlan.")):
+                return
+            data = {"role": item.role, "text": text[:10000]}
+            if getattr(item, "interrupted", False):
+                data["interrupted"] = True
+            created = getattr(item, "created_at", time.time())
+            if inspection.started_at is not None and created >= inspection.started_at:
+                data["seconds"] = round(created - inspection.started_at, 3)
+            inspection.emit_event("transcript", data, inspection.current_room, int(created * 1000))
 
     @ctx.room.on("data_received")
     def on_data(packet: rtc.DataPacket):
@@ -224,13 +259,6 @@ async def entrypoint(ctx: JobContext):
         elif mode == "inspection" and packet.topic == "floorplan.inspection.room":
             before = inspection.current_room
             inspection.room_packet(packet.data, packet.participant.identity if packet.participant else None)
-            if session_ready and inspection.current_room != before and inspection.current_room:
-                room = inspection.rooms[inspection.current_room]
-                session.generate_reply(instructions=(
-                    "Personen skanner nå et nytt rom. Husk denne rom-ID-en for bildeforespørsler. "
-                    "Spør kort om det er noe spesielt som skal undersøkes. Romdata: "
-                    + json.dumps(room)
-                ))
         elif mode == "inspection" and packet.topic == "floorplan.inspection.location":
             inspection.location_packet(packet.data, packet.participant.identity if packet.participant else None)
         elif mode == "inspection" and packet.topic == "floorplan.inspection.spatial":

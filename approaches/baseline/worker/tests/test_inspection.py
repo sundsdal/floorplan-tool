@@ -243,3 +243,46 @@ async def test_live_question_forwards_uncertain_location(state):
     assert set(location) == {"capturedAt", "tracking"}
     assert "currentRoomId" not in received[0]
     await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_event_replay_names_requests_and_acknowledges_new_results():
+    spoken = []
+    coordinator = InspectionCoordinator(
+        base_url="https://example.test", token="token", session_id="session", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None,
+        answer=spoken.append,
+    )
+    ident = str(uuid.uuid4())
+    request_id = str(uuid.uuid4())
+    coordinator._apply_event({"type": "room.upsert", "roomId": ident, "data": {"name": "Rom"}})
+    coordinator._apply_event({"type": "room.named", "roomId": ident, "data": {"name": "Kjøkken", "source": "user"}})
+    coordinator._apply_event({"type": "evidence.requested", "roomId": ident,
+                              "data": {"requestId": request_id, "target": "under_sink"}})
+    coordinator.events_loaded = True
+    coordinator._apply_event({"type": "evidence.saved", "roomId": ident,
+                              "data": {"requestId": request_id, "target": "under_sink"}})
+    assert coordinator.rooms[ident]["name"] == "Kjøkken"
+    assert coordinator.evidence[0]["requestId"] == request_id
+    assert spoken == ["Dokumentasjonen er lagret."]
+    await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_mark_evidence_requires_valid_recording_interval():
+    coordinator = InspectionCoordinator(
+        base_url="https://example.test", token="token", session_id="session", work="male",
+        participant_identity="user", publish=lambda _: None, speak=lambda _: None,
+    )
+    ident, request_id = str(uuid.uuid4()), str(uuid.uuid4())
+    coordinator.rooms[ident] = {"roomId": ident, "name": "Rom", "seconds": 0}
+    coordinator.requests[request_id] = {"roomId": ident, "target": "surface_detail"}
+    coordinator.started_at = time.time() - 10
+    assert not coordinator.mark_evidence(request_id, 5, 4)
+    assert not coordinator.mark_evidence(request_id, 1, 100)
+    assert coordinator.mark_evidence(request_id, 1, 4)
+    event = coordinator.event_queue.get_nowait()
+    assert event["type"] == "evidence.marked"
+    assert event["roomId"] == ident
+    assert event["data"] == {"requestId": request_id, "target": "surface_detail", "startSeconds": 1, "endSeconds": 4}
+    await coordinator.close()
