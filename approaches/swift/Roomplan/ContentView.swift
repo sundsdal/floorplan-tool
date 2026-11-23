@@ -58,16 +58,18 @@ struct ContentView: View {
                                 Button { Task { await store.start() } } label: {
                                     Label("Scan a room", systemImage: "viewfinder")
                                 }
-                                .disabled(!store.supported)
+                                .disabled(!store.supported || inspection.busy || store.inspectionFinalizationStarted)
                             }
-                            if store.hasActiveFloor && !store.processing {
+                            if store.hasActiveFloor && !store.processing && inspection.link == nil {
                                 Button("Finish floor", action: store.finishFloor)
                             }
                             if !store.supported {
                                 Text("Room scanning requires a supported device with LiDAR. You can use Floorplan AI for video capture instead. Saved scans can still be viewed and shared.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             } else {
-                                Text("Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
+                                Text(inspection.link != nil
+                                     ? "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover."
+                                     : "Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         }
@@ -79,11 +81,11 @@ struct ContentView: View {
                                     if let roomName = request.roomName { Text(roomName).font(.caption) }
                                     Text(request.prompt)
                                     Button("Ta bilde") { showingEvidenceCamera = true }
-                                        .disabled(store.processing || inspection.busy)
+                                        .disabled(store.processing || inspection.busy || store.inspectionFinalizationStarted)
                                 }
                                 if inspection.link != nil {
                                     Button("Send befaring til jobbkortet") { Task { await store.finishInspection() } }
-                                        .disabled(store.processing || inspection.busy)
+                                        .disabled(store.processing || inspection.busy || store.evidenceCaptureInProgress || !store.hasInspectionRooms)
                                 }
                             }
                         }

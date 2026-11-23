@@ -18,6 +18,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     @Published var scanning = false
     @Published var processing = false
     @Published private(set) var evidenceCaptureInProgress = false
+    @Published private(set) var inspectionFinalizationStarted = false
     @Published var instruction = "Move slowly around the room, keeping walls and openings in view."
     @Published private(set) var captureView: RoomCaptureView
     @Published private(set) var liveMap = LiveMapSnapshot()
@@ -30,9 +31,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     private var trackingTask: Task<Void, Never>?
     var hasActiveFloor: Bool { rooms.contains { $0.sessionID == sessionID } }
     private var stopping = false
+    private var scanGeneration = 0
     let inspection = InspectionGuide()
     private var inspectionRoomID: UUID?
     private var inspectionRooms: [(id: UUID, saved: SavedRoom)] = []
+    var hasInspectionRooms: Bool { !inspectionRooms.isEmpty }
 
     override init() {
         let arSession = ARSession()
@@ -50,8 +53,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     var supported: Bool { RoomCaptureSession.isSupported }
 
     func start() async {
+        guard !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted else { return }
         guard supported else { message = "RoomPlan requires a supported iPhone or iPad with LiDAR."; return }
+        let generation = scanGeneration
         let authorized = await AVCaptureDevice.requestAccess(for: .video)
+        guard generation == scanGeneration, !scanning, !processing, !inspection.busy, !inspectionFinalizationStarted else { return }
         guard authorized else { message = "Allow camera access in Settings to scan a room."; return }
         stopping = false
         if inspection.link != nil {
@@ -214,7 +220,8 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         }
         do {
             try await inspection.confirm()
-            finishFloor()
+            resetFloor()
+            inspectionFinalizationStarted = false
             inspectionRooms = []
             inspectionRoomID = nil
             await start()
@@ -224,7 +231,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     }
 
     func captureInspectionEvidence() async {
-        guard !evidenceCaptureInProgress else { return }
+        guard inspection.link != nil, !inspection.busy, !inspectionFinalizationStarted, !evidenceCaptureInProgress else { return }
         evidenceCaptureInProgress = true
         defer { evidenceCaptureInProgress = false }
         guard let request = inspection.request else { return }
@@ -246,7 +253,13 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     }
 
     func finishInspection() async {
-        guard !scanning && !processing else { return }
+        guard inspection.link != nil, !scanning, !processing, !inspection.busy, !evidenceCaptureInProgress else { return }
+        guard hasInspectionRooms else {
+            inspection.status = "Skann minst ett rom før du sender befaringen."
+            return
+        }
+        scanGeneration += 1
+        inspectionFinalizationStarted = true
         inspection.busy = true
         defer { inspection.busy = false }
         do {
@@ -264,13 +277,18 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             await inspection.disconnect()
             inspection.status = "Befaringen er sendt til jobbkortet."
             inspection.link = nil
+            inspectionFinalizationStarted = false
         } catch {
             inspection.status = "Kunne ikke sende befaringen. Prøv igjen."
         }
     }
 
     func finishFloor() {
-        guard !scanning && !processing else { return }
+        guard !scanning, !processing, inspection.link == nil, !inspection.busy else { return }
+        resetFloor()
+    }
+
+    private func resetFloor() {
         captureView.captureSession.arSession.pause()
         captureView.captureSession.delegate = nil
         sessionID = UUID()
