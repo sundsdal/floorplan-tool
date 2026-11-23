@@ -88,8 +88,9 @@ før brukeren har bekreftet bildet.""")
             target: One of under_sink, shaft_access, ventilation, surface_detail.
             prompt: One brief, concrete request in Norwegian.
         """
-        if await self.inspection.request_evidence(room_id, target, prompt):
-            return "Forespørselen er vist på telefonen. Be brukeren ta bildet."
+        request = await self.inspection.request_evidence(room_id, target, prompt)
+        if request:
+            return "Forespørselen er vist på telefonen. Be brukeren filme. Forespørsel: " + json.dumps(request, ensure_ascii=False)
         return "Forespørselen kunne ikke vises, eller venter allerede på et bilde."
 
 
@@ -108,7 +109,10 @@ før brukeren har bekreftet bildet.""")
     @function_tool()
     async def get_current_room(self) -> str:
         """Return the latest measured room, position and pointing direction, or its uncertainty."""
-        return json.dumps(self.inspection.current_location(), ensure_ascii=False)
+        location = dict(self.inspection.current_location())
+        if self.inspection.started_at is not None:
+            location["recordingSeconds"] = max(0, round(time.time() - self.inspection.started_at, 1))
+        return json.dumps(location, ensure_ascii=False)
 
     @function_tool()
     async def ask_hydrogen(self, question: str) -> str:
