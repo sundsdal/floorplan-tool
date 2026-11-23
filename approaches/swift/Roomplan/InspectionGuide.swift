@@ -109,9 +109,14 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     private var session: GuideSession?
     private var keepaliveTask: Task<Void, Never>?
     private var recordingTask: Task<Void, Never>?
-    private var evidenceTask: Task<Void, Never>?
-    private var evidenceTaskID: UUID?
-    private var pendingEvidence: [String: Data] = [:]
+    private var reliableTask: Task<Void, Never>?
+    private var reliableTaskID: UUID?
+    private struct PendingPacket {
+        let key: String
+        let topic: String
+        let data: Data
+    }
+    private var pendingPackets: [PendingPacket] = []
     private var startTime: Double?
     private var activeRoom: (String, String)?
     private var finalized = false
@@ -241,8 +246,8 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
                     let data = try await cloudRequest("/api/livekit/session/\(session.sessionId)/recording", method: "POST", body: Data("{}".utf8))
                     if let started = try JSONDecoder().decode(Recording.self, from: data).startedAt {
                         startTime = started
-                        await send(["startedAt": started], topic: "floorplan.recording")
-                        if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
+                        enqueueRecording(started)
+                        if let activeRoom { announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
                         return
                     }
                 } catch { }
@@ -252,7 +257,7 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
-    func announceRoom(id: String, name: String, phase: String) async {
+    func announceRoom(id: String, name: String, phase: String) {
         if phase == "start" { activeRoom = (id, name) }
         let seconds = startTime.map { max(0, Date().timeIntervalSince1970 - $0 / 1000) } ?? 0
         if phase == "start", startTimeByRoom[id] == nil { startTimeByRoom[id] = seconds }
@@ -262,7 +267,9 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
             if activeRoom?.0 == id { activeRoom = nil }
         }
         let announcedSeconds = phase == "start" ? (startTimeByRoom[id] ?? seconds) : seconds
-        await send(["roomId": id, "name": name, "seconds": announcedSeconds, "phase": phase], topic: "floorplan.inspection.room")
+        if let data = try? JSONSerialization.data(withJSONObject: ["roomId": id, "name": name, "seconds": announcedSeconds, "phase": phase]) {
+            enqueuePacket(key: "room:\(id):\(phase)", topic: "floorplan.inspection.room", data: data)
+        }
     }
 
     private func send(_ value: [String: Any], topic: String) async {
@@ -339,13 +346,11 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         }
     }
 
-    private func replayState(for callbackRoom: Room) async {
+    private func replayState(for callbackRoom: Room) {
         guard room === callbackRoom else { return }
-        if let startTime { await send(["startedAt": startTime], topic: "floorplan.recording") }
-        guard room === callbackRoom else { return }
-        if let activeRoom { await announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
-        guard room === callbackRoom else { return }
-        sendPendingEvidence()
+        if let startTime { enqueueRecording(startTime) }
+        if let activeRoom { announceRoom(id: activeRoom.0, name: activeRoom.1, phase: "start") }
+        sendPendingPackets()
         if let latestLocation {
             pendingLocation = latestLocation
             sendPendingLocation()
@@ -353,11 +358,11 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     }
 
     nonisolated func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
-        Task { @MainActor [weak self] in await self?.replayState(for: room) }
+        Task { @MainActor [weak self] in self?.replayState(for: room) }
     }
 
     nonisolated func roomDidReconnect(_ room: Room) {
-        Task { @MainActor [weak self] in await self?.replayState(for: room) }
+        Task { @MainActor [weak self] in self?.replayState(for: room) }
     }
 
     nonisolated func room(_ room: Room, participant: RemoteParticipant?, didReceiveData data: Data, forTopic topic: String, encryptionType: EncryptionType) {
@@ -387,31 +392,41 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
         self.request = nil
         // Keep the notification until LiveKit accepts it, independent of the local photo.
         if let data = try? JSONSerialization.data(withJSONObject: ["requestId": request.requestId, "roomId": request.roomId.lowercased()]) {
-            pendingEvidence[request.requestId] = data
-            sendPendingEvidence()
+            enqueuePacket(key: "evidence:\(request.requestId)", topic: "floorplan.inspection.evidence", data: data)
         }
     }
 
-    private func sendPendingEvidence() {
-        guard evidenceTask == nil, !pendingEvidence.isEmpty, let room, connected else { return }
+    private func enqueueRecording(_ startedAt: Double) {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["startedAt": startedAt]) else { return }
+        enqueuePacket(key: "recording", topic: "floorplan.recording", data: data)
+    }
+
+    private func enqueuePacket(key: String, topic: String, data: Data) {
+        guard !pendingPackets.contains(where: { $0.key == key }) else { return }
+        pendingPackets.append(PendingPacket(key: key, topic: topic, data: data))
+        sendPendingPackets()
+    }
+
+    private func sendPendingPackets() {
+        guard reliableTask == nil, !pendingPackets.isEmpty, let room, connected else { return }
         let taskID = UUID()
-        evidenceTaskID = taskID
-        evidenceTask = Task { [weak self] in
+        reliableTaskID = taskID
+        reliableTask = Task { [weak self] in
             guard let self else { return }
             defer {
-                if evidenceTaskID == taskID {
-                    evidenceTask = nil
-                    evidenceTaskID = nil
+                if reliableTaskID == taskID {
+                    reliableTask = nil
+                    reliableTaskID = nil
                 }
             }
             while !Task.isCancelled, self.room === room, connected,
-                  let (requestID, data) = pendingEvidence.first {
+                  let packet = pendingPackets.first {
                 do {
-                    try await room.localParticipant.publish(data: data, options: DataPublishOptions(topic: "floorplan.inspection.evidence", reliable: true))
-                    guard !Task.isCancelled, self.room === room, evidenceTaskID == taskID else { return }
-                    pendingEvidence.removeValue(forKey: requestID)
+                    try await room.localParticipant.publish(data: packet.data, options: DataPublishOptions(topic: packet.topic, reliable: true))
+                    guard !Task.isCancelled, self.room === room, reliableTaskID == taskID else { return }
+                    pendingPackets.removeFirst()
                 } catch {
-                    guard !Task.isCancelled, self.room === room, evidenceTaskID == taskID else { return }
+                    guard !Task.isCancelled, self.room === room, reliableTaskID == taskID else { return }
                     do { try await Task.sleep(for: .seconds(2)) } catch { return }
                 }
             }
@@ -466,10 +481,10 @@ final class InspectionGuide: NSObject, ObservableObject, RoomDelegate {
     func disconnect() async {
         recordingTask?.cancel()
         keepaliveTask?.cancel()
-        evidenceTask?.cancel()
-        evidenceTask = nil
-        evidenceTaskID = nil
-        pendingEvidence.removeAll()
+        reliableTask?.cancel()
+        reliableTask = nil
+        reliableTaskID = nil
+        pendingPackets.removeAll()
         let disconnectedRoom = room
         room = nil
         connected = false

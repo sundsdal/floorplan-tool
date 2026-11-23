@@ -63,7 +63,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         if inspection.link != nil {
             let roomID = UUID()
             inspectionRoomID = roomID
-            Task { await inspection.announceRoom(id: roomID.uuidString.lowercased(), name: "Rom \(inspectionRooms.count + 1)", phase: "start") }
+            inspection.announceRoom(id: roomID.uuidString.lowercased(), name: "Rom \(inspectionRooms.count + 1)", phase: "start")
         }
         frameSampler.reset()
         savedFloorMap = LiveMapSnapshot()
@@ -199,7 +199,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                     self.inspectionRooms.append((id: id, saved: entry))
                     self.savedFloorMap.add(room, name: entry.name, roomID: id.uuidString.lowercased())
                     self.liveMap = self.savedFloorMap
-                    await self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
+                    self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
                     self.inspectionRoomID = nil
                 }
                 if RoomAnnotationClient.shared.signedIn && !frames.isEmpty {
