@@ -259,15 +259,17 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             return
         }
         scanGeneration += 1
-        inspectionFinalizationStarted = true
         inspection.busy = true
         defer { inspection.busy = false }
         do {
+            let convertedRooms = try inspectionRooms.map { item in
+                (item: item, document: RoomPlanConverter.convert(try capturedRoom(item.saved)))
+            }
+            inspectionFinalizationStarted = true
             try await inspection.finalize()
-            let submittedRooms = try inspectionRooms.map { item in
+            let submittedRooms = convertedRooms.map { item, converted in
                 let saved = rooms.first(where: { $0.id == item.saved.id }) ?? item.saved
                 let annotation = RoomAnnotationStore.load(directory: roomDirectory(saved))
-                let converted = RoomPlanConverter.convert(try capturedRoom(saved))
                 var document = annotation?.applying(to: converted) ?? converted
                 if !document.floorplan.rooms.isEmpty { document.floorplan.rooms[0].id = item.id.uuidString.lowercased() }
                 return InspectionGuide.ScannedRoom(roomId: item.id.uuidString.lowercased(), name: saved.name,
@@ -350,7 +352,12 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         try JSONDecoder().decode(CapturedRoom.self, from: Data(contentsOf: roomDirectory(room).appending(path: "capture.json")))
     }
 
+    func canDelete(_ room: SavedRoom) -> Bool {
+        inspection.link == nil || !inspectionRooms.contains { $0.saved.id == room.id }
+    }
+
     func delete(_ room: SavedRoom) {
+        guard canDelete(room) else { return }
         do {
             try FileManager.default.removeItem(at: roomDirectory(room))
             rooms.removeAll { $0.id == room.id }

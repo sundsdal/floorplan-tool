@@ -134,6 +134,7 @@ struct ContentView: View {
                                         }
                                     }
                                 }
+                                .deleteDisabled(!store.canDelete(room))
                             }
                             .onDelete { offsets in offsets.map { store.rooms[$0] }.forEach(store.delete) }
                         }
