@@ -1,5 +1,8 @@
 name: Roomplan
 packages:
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift.git
+    from: 2.13.0
   GoogleSignIn:
     url: https://github.com/google/GoogleSignIn-iOS
     from: 8.0.0
@@ -13,6 +16,8 @@ targets:
     sources:
       - Roomplan
     dependencies:
+      - package: LiveKit
+        product: LiveKit
       - package: GoogleSignIn
         product: GoogleSignIn
     settings:

@@ -1,12 +1,19 @@
 """Schedule incremental scene reviews without blocking the live conversation."""
 
 import asyncio
+import logging
 import math
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 
 import httpx
+
+INITIAL_DRAFT_DELAY_SECONDS = 20
+DRAFT_INTERVAL_SECONDS = 20
+EGRESS_LAG_SECONDS = 5
+MIN_DRAFT_SECONDS = 10
+logger = logging.getLogger(__name__)
 
 
 class DraftCoordinator:
@@ -29,12 +36,13 @@ class DraftCoordinator:
         self.lock = asyncio.Lock()
         self.inflight = set()
         self.seen = set()
+        self.automatic_task = None
 
     def start(self, started_at: float):
         if self.started_at is not None or self.closed:
             return
         self.started_at = started_at
-        self._spawn(self._fallback())
+        self._spawn(self._periodic())
 
     def _spawn(self, coroutine):
         task = asyncio.create_task(coroutine)
@@ -42,21 +50,27 @@ class DraftCoordinator:
         task.add_done_callback(self.tasks.discard)
         return task
 
-    async def _fallback(self):
-        await asyncio.sleep(max(0, self.started_at + 30 - time.time()))
-        while not self.closed and self.last_end == 0 and self.inflight:
-            await asyncio.sleep(self.retry_delay or 0.01)
-        if not self.closed and self.last_end == 0:
-            await self.review(0, max(0, time.time() - self.started_at))
+    async def _periodic(self):
+        await asyncio.sleep(max(0, self.started_at + INITIAL_DRAFT_DELAY_SECONDS - time.time()))
+        while not self.closed:
+            self._schedule_automatic()
+            await asyncio.sleep(DRAFT_INTERVAL_SECONDS)
 
     def milestone(self):
+        return self._schedule_automatic()
+
+    def _schedule_automatic(self):
         if self.started_at is None or self.closed:
             return False
-        end = time.time() - self.started_at
-        start = max(0, self.last_end - 2) if self.last_end else 0
-        if end <= self.last_end:
+        if self.automatic_task is not None and not self.automatic_task.done():
             return False
-        self._spawn(self.review(start, end))
+        # HLS segments trail the live camera. Only ask for footage that is likely
+        # to have been committed, leaving a small overlap for the next review.
+        end = max(0, time.time() - self.started_at - EGRESS_LAG_SECONDS)
+        start = max(0, self.last_end - 2) if self.last_end else 0
+        if end < MIN_DRAFT_SECONDS or end <= self.last_end + 1:
+            return False
+        self.automatic_task = self._spawn(self.review(start, end))
         return True
 
     async def review(self, start: float, end: float, target_id: str | None = None):
@@ -131,7 +145,11 @@ class DraftCoordinator:
                 return True
         except asyncio.CancelledError:
             raise
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            if isinstance(error, httpx.HTTPStatusError):
+                logger.warning("Scene review failed with HTTP status %s", error.response.status_code)
+            else:
+                logger.warning("Scene review failed (%s)", type(error).__name__)
             return False
 
     async def target_context(self, target_id: str):

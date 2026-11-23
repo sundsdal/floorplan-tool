@@ -33,7 +33,7 @@ async def test_review_retries_pending_and_publishes_authoritative_scene_once():
 
 
 @pytest.mark.asyncio
-async def test_fallback_and_milestone_deduplicate_pending():
+async def test_periodic_and_milestone_deduplicate_pending():
     entered, release = asyncio.Event(), asyncio.Event()
     requests = []
     async def handler(request):
@@ -49,11 +49,48 @@ async def test_fallback_and_milestone_deduplicate_pending():
         publish=publish, transport=httpx.MockTransport(handler), retry_delay=0)
     draft.start(time.time() - 31)
     await entered.wait()
-    assert draft.milestone()
+    assert not draft.milestone()
     release.set()
-    await asyncio.gather(*list(draft.tasks))
+    await draft.automatic_task
     assert len(requests) == 1
     assert requests[0]["startSeconds"] == 0
+    await draft.close()
+
+
+@pytest.mark.asyncio
+async def test_periodic_draft_retries_failure_and_processes_later_footage(monkeypatch):
+    monkeypatch.setattr("worker.draft.DRAFT_INTERVAL_SECONDS", 0.01)
+    revision, requests, packets = [0], [], []
+    published = asyncio.Event()
+
+    async def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"scene": {"revision": revision[0]}})
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(503)
+        revision[0] += 1
+        return httpx.Response(200, json={"scene": {"revision": revision[0]}})
+
+    async def publish(packet):
+        packets.append(packet)
+        published.set()
+
+    draft = DraftCoordinator(base_url="https://server", token="token", session_id="session",
+        publish=publish, transport=httpx.MockTransport(handler), retry_delay=0)
+    draft.start(time.time() - 31)
+    await asyncio.wait_for(published.wait(), timeout=1)
+    assert len(requests) == 2
+    assert requests[0]["startSeconds"] == requests[1]["startSeconds"] == 0
+    assert packets == [{"type": "scene", "revision": 1}]
+
+    # Advance the capture clock without waiting for a real walkthrough.
+    draft.started_at -= 15
+    published.clear()
+    await asyncio.wait_for(published.wait(), timeout=1)
+    assert requests[-1]["startSeconds"] > 0
+    assert requests[-1]["endSeconds"] > requests[1]["endSeconds"]
+    assert packets[-1] == {"type": "scene", "revision": 2}
     await draft.close()
 
 

@@ -11,8 +11,12 @@
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>NSCameraUsageDescription</key><string>Kameraet brukes til å skanne rommet og beskrive synlige detaljer.</string>
+<key>NSMicrophoneUsageDescription</key><string>Mikrofonen brukes til å snakke med veilederen under befaringen.</string>
+<key>NSLocalNetworkUsageDescription</key><string>Appen kobler befaringen til jobbkortet på lokalnettet.</string>
+<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+<key>ROOMPLAN_INSPECTION_ORIGIN</key><string>$(ROOMPLAN_INSPECTION_ORIGIN)</string>
 <key>UILaunchScreen</key><dict/>
 <key>GIDClientID</key><string>$(ROOMPLAN_GOOGLE_IOS_CLIENT_ID)</string>
 <key>GIDServerClientID</key><string>$(ROOMPLAN_GOOGLE_WEB_CLIENT_ID)</string>
-<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>$(ROOMPLAN_GOOGLE_REVERSED_CLIENT_ID)</string></array></dict></array>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>$(ROOMPLAN_GOOGLE_REVERSED_CLIENT_ID)</string></array></dict><dict><key>CFBundleURLSchemes</key><array><string>floorplanscan</string></array></dict></array>
 </dict></plist>

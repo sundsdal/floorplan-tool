@@ -76,6 +76,13 @@ describe("LiveKit session lifecycle", () => {
 			object: `captures/${session.sessionId}/recording.m3u8`,
 		});
 	});
+	it("dispatches an inspection with the selected work context", async () => {
+		const session = await createSession({ mode: "inspection", work: "slipe" });
+		const metadata = JSON.parse(mocks.createDispatch.mock.calls[0][2].metadata);
+		expect(metadata.mode).toBe("inspection");
+		expect(metadata.work).toBe("slipe");
+		expect(authorizeReview(session.sessionId, metadata.reviewToken)).toBe(true);
+	});
 	it("starts participant HLS and stops active recording only once", async () => {
 		const session = await createSession();
 		mocks.startParticipantEgress.mockResolvedValue({

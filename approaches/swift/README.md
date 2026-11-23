@@ -17,3 +17,9 @@ ROOMPLAN_GOOGLE_REVERSED_CLIENT_ID = <reversed iOS OAuth client ID>
 ```
 
 After sign-in, the app sends up to 12 sampled images and the RoomPlan object inventory to the report API when a room is saved. The app stores the report beside the scan and shares it as Markdown.
+
+## Guided risk inspection
+
+Set `ROOMPLAN_INSPECTION_ORIGIN` to the authorized Risikovurdering origin when signing the app. The job card opens an inspection in Floorplan Scan. RoomPlan supplies the map and camera pose, while LiveKit carries the AR camera frames and microphone to Gemini 3.8 Live.
+
+The floorplan service sends the committed inspection video and room timestamps to Gemini 4 Hydrogen in the EU. It can ask the live guide for a new close-up in a room that was already scanned. The mobile app keeps the request attached to that room and submits each explicitly captured photo with the plan and inspection report.

@@ -178,6 +178,19 @@ async function usingMedia<T>(
 		await rm(dir, { recursive: true, force: true });
 	}
 }
+/** Materialize the full committed video up to the requested inspection checkpoint. */
+export function withInspectionVideo<T>(
+	sessionId: string,
+	endSeconds: number | undefined,
+	review: (file: string) => Promise<T>,
+) {
+	return usingMedia(
+		sessionId,
+		endSeconds === undefined ? null : [{ startSeconds: 0, endSeconds }],
+		([file]) => review(file),
+	);
+}
+
 async function withUploads<T>(
 	files: string[],
 	callback: (videos: UploadedVideo[]) => Promise<T>,

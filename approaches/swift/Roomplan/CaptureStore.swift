@@ -29,6 +29,9 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
     private var trackingTask: Task<Void, Never>?
     var hasActiveFloor: Bool { rooms.contains { $0.sessionID == sessionID } }
     private var stopping = false
+    let inspection = InspectionGuide()
+    private var inspectionRoomID: UUID?
+    private var inspectionRooms: [(id: UUID, saved: SavedRoom)] = []
 
     override init() {
         let arSession = ARSession()
@@ -50,6 +53,11 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
         let authorized = await AVCaptureDevice.requestAccess(for: .video)
         guard authorized else { message = "Allow camera access in Settings to scan a room."; return }
         stopping = false
+        if inspection.link != nil {
+            let roomID = UUID()
+            inspectionRoomID = roomID
+            Task { await inspection.announceRoom(id: roomID.uuidString.lowercased(), name: "Rom \(inspectionRooms.count + 1)", phase: "start") }
+        }
         frameSampler.reset()
         savedFloorMap = LiveMapSnapshot()
         for entry in rooms where entry.sessionID == sessionID {
@@ -81,6 +89,7 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
                             forward: LiveMapPoint(-Double(transform.columns.2.x), -Double(transform.columns.2.z))
                         )
                     }
+                    if inspection.link != nil { inspection.capture(frame.capturedImage) }
                     if RoomAnnotationClient.shared.signedIn {
                         frameSampler.sample(frame.capturedImage)
                     }
@@ -146,12 +155,63 @@ final class CaptureStore: NSObject, ObservableObject, RoomCaptureSessionDelegate
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 let entry = try self.save(room)
+                if let id = self.inspectionRoomID {
+                    self.inspectionRooms.append((id: id, saved: entry))
+                    await self.inspection.announceRoom(id: id.uuidString.lowercased(), name: entry.name, phase: "finish")
+                    self.inspectionRoomID = nil
+                }
                 if RoomAnnotationClient.shared.signedIn && !frames.isEmpty {
                     self.annotationPending.insert(entry.id)
                     Task { await self.annotate(room, entry: entry, frames: frames) }
                 }
             } catch { self.message = "Could not save this room: \(error.localizedDescription). Previously saved rooms are still available." }
             self.processing = false
+        }
+    }
+
+    func beginInspection() async {
+        guard !scanning, !processing, inspection.link == nil,
+              !inspection.busy, !inspection.connected else {
+            inspection.pendingLink = nil
+            inspection.status = "Fullfør den aktive skanningen før du starter en ny befaring."
+            return
+        }
+        do {
+            try await inspection.confirm()
+            finishFloor()
+            inspectionRooms = []
+            inspectionRoomID = nil
+            await start()
+        } catch {
+            inspection.status = "Kunne ikke starte befaringen. Kontroller innlogging og tilkobling."
+        }
+    }
+
+    func captureInspectionEvidence() async {
+        await inspection.takeEvidence(captureView.captureSession.arSession.currentFrame?.capturedImage)
+    }
+
+    func finishInspection() async {
+        guard !scanning && !processing else { return }
+        inspection.busy = true
+        defer { inspection.busy = false }
+        do {
+            try await inspection.finalize()
+            let submittedRooms = try inspectionRooms.map { item in
+                let saved = rooms.first(where: { $0.id == item.saved.id }) ?? item.saved
+                let annotation = RoomAnnotationStore.load(directory: roomDirectory(saved))
+                let converted = RoomPlanConverter.convert(try capturedRoom(saved))
+                var document = annotation?.applying(to: converted) ?? converted
+                if !document.floorplan.rooms.isEmpty { document.floorplan.rooms[0].id = item.id.uuidString.lowercased() }
+                return InspectionGuide.ScannedRoom(roomId: item.id.uuidString.lowercased(), name: saved.name,
+                                                   document: document, report: annotation?.markdown)
+            }
+            try await inspection.submit(rooms: submittedRooms)
+            await inspection.disconnect()
+            inspection.status = "Befaringen er sendt til jobbkortet."
+            inspection.link = nil
+        } catch {
+            inspection.status = "Kunne ikke sende befaringen. Prøv igjen."
         }
     }
 

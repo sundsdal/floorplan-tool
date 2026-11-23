@@ -9,16 +9,18 @@
 /* Begin PBXBuildFile section */
 		4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */; };
 		488ED675BD25C401C5F7008B /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */; };
-		5DF3C9345A3B2FAD918C4F19 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 0DD69F458422E3FF370BC61C /* GoogleSignIn */; };
+		5DF3C9345A3B2FAD918C4F19 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0E37D9FAC748C944481F89A5 /* LiveKit */; };
 		5E1FFAD73EC44270171A4A1D /* LiveRoomMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6050229EDB84731DB788BF3A /* LiveRoomMap.swift */; };
 		8085607931A95535BBBBE2A6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D3602976A827ED45303FBAA /* Assets.xcassets */; };
 		964C36DAFC687D944545CBE3 /* SVGRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */; };
+		996A5C0AC5696537F88B2717 /* InspectionGuide.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2B5DA7B47463EAEEE22EDB /* InspectionGuide.swift */; };
 		9E47F7B02D4FFC97C4C95A02 /* RoomplanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24CB24A93EE055427841733 /* RoomplanApp.swift */; };
 		A164A91177309BAFF53DA7F2 /* GeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB74CACBA5E3EB32170E4500 /* GeometryTests.swift */; };
 		D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5FD443A7A344949E0E343D /* FloorplanDocument.swift */; };
 		E3699362E41B4E791EE554A5 /* RoomAnnotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */; };
 		E8CC2ED744FC3A970CF3AC94 /* rotated-l.json in Resources */ = {isa = PBXBuildFile; fileRef = 20A3987AD3EE2275D6B92CEA /* rotated-l.json */; };
 		ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */; };
+		F28109281F0AC1E4E801C855 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 0DD69F458422E3FF370BC61C /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -42,6 +44,7 @@
 		B24CB24A93EE055427841733 /* RoomplanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomplanApp.swift; sourceTree = "<group>"; };
 		C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomAnnotation.swift; sourceTree = "<group>"; };
 		C98C13F5DA987B8AA7AF3255 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CD2B5DA7B47463EAEEE22EDB /* InspectionGuide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectionGuide.swift; sourceTree = "<group>"; };
 		E4E802A5B745413ACAC23A8D /* SVGRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVGRenderer.swift; sourceTree = "<group>"; };
 		E651F6A18B16C62A1DCFC604 /* RoomPlanConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomPlanConverter.swift; sourceTree = "<group>"; };
 		EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -53,7 +56,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5DF3C9345A3B2FAD918C4F19 /* GoogleSignIn in Frameworks */,
+				5DF3C9345A3B2FAD918C4F19 /* LiveKit in Frameworks */,
+				F28109281F0AC1E4E801C855 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -104,6 +108,7 @@
 				518A2FBDFC81A6F299350BE9 /* CaptureStore.swift */,
 				EBFD0BA4CB46F0EF1E5F41E1 /* ContentView.swift */,
 				C98C13F5DA987B8AA7AF3255 /* Info.plist */,
+				CD2B5DA7B47463EAEEE22EDB /* InspectionGuide.swift */,
 				6050229EDB84731DB788BF3A /* LiveRoomMap.swift */,
 				C60AC3D4C2AE81DA90B83FDF /* RoomAnnotation.swift */,
 				B24CB24A93EE055427841733 /* RoomplanApp.swift */,
@@ -138,6 +143,7 @@
 			);
 			name = Roomplan;
 			packageProductDependencies = (
+				0E37D9FAC748C944481F89A5 /* LiveKit */,
 				0DD69F458422E3FF370BC61C /* GoogleSignIn */,
 			);
 			productName = Roomplan;
@@ -189,6 +195,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				0AA0EADFE12790646D993A52 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				C44EC01E32B341E48123C70F /* XCRemoteSwiftPackageReference "client-sdk-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -227,6 +234,7 @@
 				4448CAD3ACA574C32911F4A5 /* CaptureStore.swift in Sources */,
 				488ED675BD25C401C5F7008B /* ContentView.swift in Sources */,
 				D4C0A4551E4555331D01755A /* FloorplanDocument.swift in Sources */,
+				996A5C0AC5696537F88B2717 /* InspectionGuide.swift in Sources */,
 				5E1FFAD73EC44270171A4A1D /* LiveRoomMap.swift in Sources */,
 				E3699362E41B4E791EE554A5 /* RoomAnnotation.swift in Sources */,
 				ED82857C8BC817E01719A531 /* RoomPlanConverter.swift in Sources */,
@@ -496,6 +504,14 @@
 				minimumVersion = 8.0.0;
 			};
 		};
+		C44EC01E32B341E48123C70F /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/livekit/client-sdk-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.13.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -503,6 +519,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0AA0EADFE12790646D993A52 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		0E37D9FAC748C944481F89A5 /* LiveKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C44EC01E32B341E48123C70F /* XCRemoteSwiftPackageReference "client-sdk-swift" */;
+			productName = LiveKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -1,3 +1,4 @@
+import GoogleSignIn
 import RoomPlan
 import SwiftUI
 import WebKit
@@ -5,6 +6,13 @@ import WebKit
 struct ContentView: View {
     @StateObject private var store = CaptureStore()
     @StateObject private var annotations = RoomAnnotationClient.shared
+    @StateObject private var inspection: InspectionGuide
+
+    init() {
+        let store = CaptureStore()
+        _store = StateObject(wrappedValue: store)
+        _inspection = StateObject(wrappedValue: store.inspection)
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,6 +30,13 @@ struct ContentView: View {
                             }
                             Spacer()
                             VStack(spacing: 16) {
+                                if let request = inspection.request {
+                                    if let roomName = request.roomName { Text(roomName).font(.caption.weight(.semibold)) }
+                                    Text(request.prompt).font(.headline)
+                                    Button("Ta bilde") { Task { await store.captureInspectionEvidence() } }
+                                        .buttonStyle(.borderedProminent).controlSize(.large)
+                                }
+                                if inspection.link != nil { Text(inspection.status).font(.caption) }
                                 Text(store.instruction).font(.subheadline).multilineTextAlignment(.center)
                                 Button("Finish room", action: store.finish)
                                     .buttonStyle(.borderedProminent).controlSize(.large)
@@ -51,6 +66,20 @@ struct ContentView: View {
                             } else {
                                 Text("Scan each room separately. Keep the app open between rooms and return to a scanned area if tracking needs to recover. Finish the floor before starting another.")
                                     .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                        if inspection.link != nil || !inspection.status.isEmpty {
+                            Section("Befaring") {
+                                Text(inspection.status)
+                                if !inspection.finalSummary.isEmpty { Text(inspection.finalSummary) }
+                                if let request = inspection.request {
+                                    if let roomName = request.roomName { Text(roomName).font(.caption) }
+                                    Text(request.prompt)
+                                }
+                                if inspection.link != nil {
+                                    Button("Send befaring til jobbkortet") { Task { await store.finishInspection() } }
+                                        .disabled(store.processing || inspection.busy)
+                                }
                             }
                         }
                         Section("Romrapport") {
@@ -111,6 +140,24 @@ struct ContentView: View {
             } message: { Text(store.message ?? "") }
         }
         .task { await annotations.restore() }
+        .onOpenURL { url in
+            if url.scheme == "floorplanscan" { inspection.receive(url) }
+            else { _ = GIDSignIn.sharedInstance.handle(url) }
+        }
+        .alert("Start befaring", isPresented: Binding(
+            get: { inspection.pendingLink != nil },
+            set: { _ in }
+        )) {
+            Button("Start") {
+                Task {
+                    if !annotations.signedIn { await annotations.signIn() }
+                    await store.beginInspection()
+                }
+            }
+            Button("Avbryt", role: .cancel) { inspection.pendingLink = nil }
+        } message: {
+            Text("Start befaring for jobb \(inspection.pendingLink?.job ?? ""). Kamera og mikrofon deles med veilederen.")
+        }
     }
 }
 
